@@ -9,7 +9,6 @@ import struct
 import typing as t
 import uuid
 
-
 EPM_ID = (uuid.UUID("e1af8308-5d1f-11c9-91a4-08002b14a0fa"), 3, 0)
 
 
@@ -87,7 +86,7 @@ class TCPIPTower(Tower):
 
 @dataclasses.dataclass(frozen=True)
 class EptMap:
-    opnum = dataclasses.field(init=False, repr=False, default=3)
+    opnum: int = dataclasses.field(init=False, repr=False, default=3)
 
     obj: t.Optional[uuid.UUID]
     tower: Tower

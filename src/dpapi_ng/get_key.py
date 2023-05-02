@@ -2,32 +2,21 @@ from __future__ import annotations
 
 import base64
 import dataclasses
-import hashlib
 import math
 import re
 import socket
 import struct
-import sys
 import typing as t
 import uuid
 
-import gssapi
-import gssapi.raw
-import spnego
-from cryptography.hazmat.primitives import hashes, keywrap
-from cryptography.hazmat.primitives.asymmetric import dh, ec
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.concatkdf import ConcatKDFHash, ConcatKDFHMAC
-from cryptography.hazmat.primitives.kdf.kbkdf import KBKDFHMAC, CounterLocation, Mode
-from cryptography.hazmat.primitives.serialization import (
-    Encoding,
-    NoEncryption,
-    PrivateFormat,
-    load_der_private_key,
-)
-
 import sansldap
+import spnego
+import spnego.iov
+from cryptography.hazmat.primitives import hashes, keywrap
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.concatkdf import ConcatKDFHash
+from cryptography.hazmat.primitives.kdf.kbkdf import KBKDFHMAC, CounterLocation, Mode
 from sansldap._pkcs7 import (
     AlgorithmIdentifier,
     ContentInfo,
@@ -784,7 +773,7 @@ def create_alter_context(
 def create_request(
     opnum: int,
     data: bytes,
-    ctx: t.Optional[gssapi.SecurityContext] = None,
+    ctx: t.Optional[spnego.ContextProxy] = None,
     sign_header: bool = False,
 ) -> bytes:
     # Add Verification trailer to data
@@ -821,23 +810,15 @@ def create_request(
     request_data += struct.pack("<H", 1)  # Context id
     request_data += struct.pack("<H", opnum)
 
-    sec_trailer: t.Optional[SecTrailer] = None
-    if ctx and sign_header:
-        dummy_iov = gssapi.raw.IOV(
-            gssapi.raw.IOVBufferType.header,
-            b"",
-            std_layout=False,
-        )
-        gssapi.raw.wrap_iov_length(ctx, dummy_iov, confidential=True, qop=None)
-        dummy_header = dummy_iov[0].value or b""
-        dummy_header_length = len(dummy_header)
+    if ctx:
+        header_length = ctx.query_message_sizes().header
 
         sec_trailer = SecTrailer(
-            type=9,  # SPNEGO
-            level=6,  # Packet Privacy
+            type=9,
+            level=6,
             pad_length=auth_padding,
             context_id=0,
-            data=dummy_header,
+            data=b"\x00" * header_length,
         )
         pdu_req = bytearray(
             create_pdu(
@@ -850,64 +831,36 @@ def create_request(
             )
         )
 
-        sec_trailer_data = pdu_req[-(dummy_header_length + 8) : -dummy_header_length]
-        iov_buffers = gssapi.raw.IOV(
-            # The PDU header up to the stub data
-            (gssapi.raw.IOVBufferType.sign_only, pdu_req[:24]),
-            # The stub data.
-            data,
-            # The security trailer portion without the auth data
-            (gssapi.raw.IOVBufferType.sign_only, sec_trailer_data),
-            # Will store the generated header here.
-            gssapi.raw.IOVBufferType.header,
-            std_layout=False,
-        )
-        gssapi.raw.wrap_iov(
-            ctx,
-            message=iov_buffers,
-            confidential=True,
+        sign_type = spnego.iov.BufferType.sign_only if sign_header else spnego.iov.BufferType.data_readonly
+        sec_trailer_data = pdu_req[-(header_length + 8) : -header_length]
+        res = ctx.wrap_iov(
+            [
+                (sign_type, bytes(pdu_req[:24])),
+                data,
+                (sign_type, bytes(sec_trailer_data)),
+                spnego.iov.BufferType.header,
+            ],
+            encrypt=True,
             qop=None,
         )
 
+        enc_data = res.buffers[1].data or b""
+        sig = res.buffers[3].data or b""
+
         data_view = memoryview(pdu_req)
-        data_view[24 : 24 + len(data)] = iov_buffers[1].value or b""
-        data_view[-76:] = bytes(iov_buffers[3].value or b"")
+        data_view[24 : 24 + len(data)] = enc_data
+        data_view[-header_length:] = sig
 
         return bytes(pdu_req)
 
-    elif ctx:
-        iov_buffers = gssapi.raw.IOV(
-            gssapi.raw.IOVBufferType.header,
-            data,
-            std_layout=False,
-        )
-        gssapi.raw.wrap_iov(
-            ctx,
-            message=iov_buffers,
-            confidential=True,
-            qop=None,
-        )
-
-        sec_trailer = SecTrailer(
-            type=9,  # SPNEGO
-            level=6,  # Packet Privacy
-            pad_length=auth_padding,
-            context_id=0,
-            data=iov_buffers[0].value or b"",
-        )
-        stub_data = iov_buffers[1].value
-
     else:
-        stub_data = data
-
-    return create_pdu(
-        packet_type=0,
-        packet_flags=0x03,
-        call_id=1,
-        header_data=bytes(request_data),
-        stub_data=stub_data,
-        sec_trailer=sec_trailer,
-    )
+        return create_pdu(
+            packet_type=0,
+            packet_flags=0x03,
+            call_id=1,
+            header_data=bytes(request_data),
+            stub_data=data,
+        )
 
 
 def get_fault_pdu_error(data: memoryview) -> int:
@@ -954,7 +907,7 @@ def parse_alter_context(data: bytes) -> bytes:
 
 def parse_response(
     data: bytes,
-    ctx: t.Optional[gssapi.SecurityContext] = None,
+    ctx: t.Optional[spnego.ContextProxy] = None,
     sign_header: bool = False,
 ) -> bytes:
     view = memoryview(data)
@@ -979,34 +932,18 @@ def parse_response(
         stub_data = view[24:]
         padding = 0
 
-    if ctx and sign_header:
-        iov_buffers = gssapi.raw.IOV(
-            (gssapi.raw.IOVBufferType.sign_only, data[:24]),
-            stub_data.tobytes(),
-            (gssapi.raw.IOVBufferType.sign_only, auth_data[:8].tobytes()),
-            (gssapi.raw.IOVBufferType.header, False, auth_data[8:].tobytes()),
-            std_layout=False,
+    if ctx:
+        sign_type = spnego.iov.BufferType.sign_only if sign_header else spnego.iov.BufferType.data_readonly
+        res = ctx.unwrap_iov(
+            [
+                (sign_type, data[:24]),
+                stub_data.tobytes(),
+                (sign_type, auth_data[:8].tobytes()),
+                (spnego.iov.BufferType.header, auth_data[8:].tobytes()),
+            ],
         )
-        gssapi.raw.unwrap_iov(
-            ctx,
-            message=iov_buffers,
-        )
+        decrypted_stub = res.buffers[1].data or b""
 
-        decrypted_stub = iov_buffers[1].value or b""
-        return decrypted_stub[: len(decrypted_stub) - padding]
-
-    elif ctx:
-        iov_buffers = gssapi.raw.IOV(
-            (gssapi.raw.IOVBufferType.header, False, auth_data[8:].tobytes()),
-            stub_data.tobytes(),
-            std_layout=False,
-        )
-        gssapi.raw.unwrap_iov(
-            ctx,
-            message=iov_buffers,
-        )
-
-        decrypted_stub = iov_buffers[1].value or b""
         return decrypted_stub[: len(decrypted_stub) - padding]
 
     else:
@@ -1267,24 +1204,12 @@ def get_key(
         assert len(isd_towers) > 0
         isd_port = isd_towers[0].port
 
-    # DCE style is not exposed in pyspnego yet so use gssapi directly.
-    negotiate_mech = gssapi.OID.from_int_seq("1.3.6.1.5.5.2")
-    target_spn = gssapi.Name(f"host@{dc}", name_type=gssapi.NameType.hostbased_service)
-    flags = (
-        gssapi.RequirementFlag.mutual_authentication
-        | gssapi.RequirementFlag.replay_detection
-        | gssapi.RequirementFlag.out_of_sequence_detection
-        | gssapi.RequirementFlag.confidentiality
-        | gssapi.RequirementFlag.integrity
-        | gssapi.RequirementFlag.dce_style
+    ctx = spnego.client(
+        service="host",
+        hostname=dc,
+        context_req=spnego.ContextReq.default | spnego.ContextReq.dce_style,
     )
 
-    ctx = gssapi.SecurityContext(
-        name=target_spn,
-        flags=flags,
-        mech=negotiate_mech,
-        usage="initiate",
-    )
     out_token = ctx.step()
     assert out_token
 
@@ -1419,7 +1344,7 @@ def compute_l2_key(
     l1_key = rk.l1_key
     l2 = rk.l2
     l2_key = rk.l2_key
-    reseed_l2 = rk.l1 != request.l1
+    reseed_l2 = l2 == 31 or rk.l1 != request.l1
 
     # MS-GKDI 2.2.4 Group key Envelope
     # If the value in the L2 index field is equal to 31, this contains the
@@ -1639,8 +1564,8 @@ def main() -> None:
     # dc = "dc01.domain.test"
     # server = "CN=SERVER2022,OU=Servers,DC=domain,DC=test"
 
-    dc = "dc01.laps.test"
-    server = "CN=APP01,OU=Servers,DC=laps,DC=test"
+    dc = "dc01.domain.test"
+    server = "CN=SERVER2022,OU=Servers,DC=domain,DC=test"
 
     sign_header = True
 
