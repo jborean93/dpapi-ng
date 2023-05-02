@@ -1,0 +1,107 @@
+[build-system]
+requires = [
+    "setuptools >= 61.0.0",  # Support for setuptools config in pyproject.toml
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dpapi-ng"
+description = "DPAPI NG decryption for Python"
+readme = "README.md"
+requires-python = ">=3.7"
+license = {file = "LICENSE"}
+authors = [
+    { name = "Jordan Borean", email = "jborean93@gmail.com" }
+]
+keywords = ["dpapi", "dpapi-ng", "laps"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11"
+]
+dependencies = [
+    "cryptography",
+    "pyspnego >= 0.9.0",  # Needed for DCE support
+]
+dynamic = ["version"]
+
+[project.urls]
+homepage = "https://github.com/jborean93/dpapi-ng"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "dpapi_ng._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+sansldap = ["py.typed"]
+
+[tool.black]
+line-length = 120
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+
+[tool.mypy]
+exclude = "setup.py|build/|docs/|tests/integration/"
+mypy_path = "$MYPY_CONFIG_FILE_DIR/src"
+show_error_codes = true
+show_column_numbers = true
+disallow_any_unimported = true
+disallow_untyped_calls = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = "tests"
+junit_family = "xunit2"
+norecursedirs = "tests/integration"
+
+[tool.tox]
+legacy_tox_ini = """
+[tox]
+envlist = sanity,py37,py38,py39,py310,py311
+skip_missing_interpreters = true
+isolated_build = True
+
+[testenv]
+deps =
+    -r{toxinidir}/requirements-test.txt
+
+commands =
+    python -m pytest -v --cov dpapi_ng --cov-report term-missing
+
+[testenv:sanity]
+commands =
+    python -m black . --check
+    python -m isort . --check-only
+    python -m mypy .
+"""

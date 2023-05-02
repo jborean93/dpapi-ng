@@ -1,0 +1,5 @@
+[paths]
+source =
+    src/dpapi_ng
+    **/dist-packages/dpapi_ng
+    **/site-packages/dpapi_ng
