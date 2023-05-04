@@ -1,6 +1,6 @@
 import base64
 
-from dpapi_ng._client import ncrypt_unprotect_secret
+from dpapi_ng import ncrypt_unprotect_secret
 
 res = ncrypt_unprotect_secret(
     base64.b16decode(

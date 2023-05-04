@@ -3,4 +3,8 @@
 
 from __future__ import annotations
 
-__all__ = []
+from ._client import ncrypt_unprotect_secret
+
+__all__ = [
+    "ncrypt_unprotect_secret",
+]
