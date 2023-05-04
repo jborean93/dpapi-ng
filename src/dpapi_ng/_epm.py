@@ -8,7 +8,7 @@ import enum
 import typing as t
 import uuid
 
-from ._bind import SyntaxId
+from ._rpc import SyntaxId
 
 EPM = SyntaxId(uuid.UUID("e1af8308-5d1f-11c9-91a4-08002b14a0fa"), 3, 0)
 
@@ -16,7 +16,7 @@ EPM = SyntaxId(uuid.UUID("e1af8308-5d1f-11c9-91a4-08002b14a0fa"), 3, 0)
 # https://pubs.opengroup.org/onlinepubs/9629399/apdxi.htm#tagcjh_28
 
 
-class Protocol(enum.IntEnum):
+class FloorProtocol(enum.IntEnum):
     OSI = 0x00
     DNA_SESSION_CONTROL = 0x02
     DNA_SESSION_CONTROL_V3 = 0x03
@@ -45,10 +45,17 @@ class Protocol(enum.IntEnum):
     NULL = 0x21
     NETBIOS3 = 0x22
 
+    @classmethod
+    def _missing_(cls, value: object) -> t.Optional[enum.Enum]:
+        new_member = int.__new__(cls)
+        new_member._name_ = f"FloorProtocol Unknown 0x{value:04X}"
+        new_member._value_ = value  # type: ignore[assignment]
+        return cls._value2member_map_.setdefault(value, new_member)
+
 
 @dataclasses.dataclass(frozen=True)
 class Floor:
-    protocol: Protocol
+    protocol: FloorProtocol
     lhs: bytes
     rhs: bytes
 
@@ -71,7 +78,7 @@ class Floor:
         view = memoryview(data)
 
         lhs_len = int.from_bytes(view[:2], byteorder="little")
-        proto = Protocol(view[2])
+        proto = FloorProtocol(view[2])
         lhs = view[3 : lhs_len + 2].tobytes()
         offset = lhs_len + 2
 
@@ -90,7 +97,7 @@ class Floor:
 
 
 T = t.TypeVar("T")
-_FLOOR_TYPE_REGISTRY: t.Dict[Protocol, t.Callable[[bytes, bytes], Floor]] = {}
+_FLOOR_TYPE_REGISTRY: t.Dict[FloorProtocol, t.Callable[[bytes, bytes], Floor]] = {}
 
 
 def register_floor(cls: T) -> T:
@@ -107,7 +114,7 @@ class _KnownFloor(Floor):
 @dataclasses.dataclass(frozen=True)
 @register_floor
 class TCPFloor(_KnownFloor):
-    protocol: Protocol = dataclasses.field(init=False, default=Protocol.TCP)
+    protocol: FloorProtocol = dataclasses.field(init=False, default=FloorProtocol.TCP)
     port: int
 
     def pack(self) -> bytes:
@@ -125,11 +132,11 @@ class TCPFloor(_KnownFloor):
 @dataclasses.dataclass(frozen=True)
 @register_floor
 class IPFloor(_KnownFloor):
-    protocol: Protocol = dataclasses.field(init=False, default=Protocol.IP)
+    protocol: FloorProtocol = dataclasses.field(init=False, default=FloorProtocol.IP)
     addr: int
 
     def pack(self) -> bytes:
-        return Floor(self.protocol, b"", self.addr.to_bytes(2, byteorder="big")).pack()
+        return Floor(self.protocol, b"", self.addr.to_bytes(4, byteorder="big")).pack()
 
     @classmethod
     def _unpack(
@@ -143,7 +150,7 @@ class IPFloor(_KnownFloor):
 @dataclasses.dataclass(frozen=True)
 @register_floor
 class RPCConnectionOrientedFloor(_KnownFloor):
-    protocol: Protocol = dataclasses.field(init=False, default=Protocol.RPC_CONNECTION_ORIENTED)
+    protocol: FloorProtocol = dataclasses.field(init=False, default=FloorProtocol.RPC_CONNECTION_ORIENTED)
     version_minor: int
 
     def pack(self) -> bytes:
@@ -161,7 +168,7 @@ class RPCConnectionOrientedFloor(_KnownFloor):
 @dataclasses.dataclass(frozen=True)
 @register_floor
 class UUIDFloor(_KnownFloor):
-    protocol: Protocol = dataclasses.field(init=False, default=Protocol.UUID_ID)
+    protocol: FloorProtocol = dataclasses.field(init=False, default=FloorProtocol.UUID_ID)
     uuid: uuid.UUID
     version: int
     version_minor: int
@@ -273,7 +280,6 @@ class EptMap:
         padding = -(tower_length + 4) % 8
 
         floor_len = int.from_bytes(view[12:14], byteorder="little")
-        assert floor_len == 5
         view = view[14:]
 
         tower = []
@@ -379,7 +385,6 @@ class EptMapResult:
             padding = -(tower_length + 4) % 8
 
             floor_len = int.from_bytes(view[12:14], byteorder="little")
-            assert floor_len == 5
             view = view[14:]
 
             tower = []

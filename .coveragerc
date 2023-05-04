@@ -3,3 +3,6 @@ source =
     src/dpapi_ng
     **/dist-packages/dpapi_ng
     **/site-packages/dpapi_ng
+[run]
+omit =
+    src/dpapi_ng/_version.py

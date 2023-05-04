@@ -32,6 +32,7 @@ class AuthenticationProvider:
             "ntlm": SecurityProvider.RPC_C_AUTHN_GSS_KERBEROS,
             "kerberos": SecurityProvider.RPC_C_AUTHN_WINNT,
         }[protocol]
+        self._header_length = 0
 
     @property
     def complete(self) -> bool:
@@ -51,7 +52,7 @@ class AuthenticationProvider:
         )
 
     def get_empty_trailer(self, pad_length: int) -> SecTrailer:
-        header_length = self.ctx.query_message_sizes().header
+        header_length = self._header_length = self._header_length or self.ctx.query_message_sizes().header
         return SecTrailer(
             type=self.provider,
             level=AuthenticationLevel.RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
@@ -62,24 +63,24 @@ class AuthenticationProvider:
 
     def wrap(
         self,
-        header: bytearray,
+        header: bytes,
         body: bytes,
-        trailer: bytearray,
+        trailer: bytes,
         sign_header: bool,
-    ) -> bytearray:
+    ) -> bytes:
         sign_buffer_type = spnego.iov.BufferType.sign_only if sign_header else spnego.iov.BufferType.data_readonly
         res = self.ctx.wrap_iov(
             [
-                (sign_buffer_type, bytes(header)),
+                (sign_buffer_type, header),
                 body,
-                (sign_buffer_type, bytes(trailer)),
+                (sign_buffer_type, trailer),
                 spnego.iov.BufferType.header,
             ],
             encrypt=True,
             qop=None,
         )
 
-        return bytearray().join(
+        return b"".join(
             [
                 header,
                 res.buffers[1].data or b"",
@@ -97,15 +98,13 @@ class AuthenticationProvider:
         sign_header: bool,
     ) -> bytes:
         sign_buffer_type = spnego.iov.BufferType.sign_only if sign_header else spnego.iov.BufferType.data_readonly
-        res = self.ctx.wrap_iov(
+        res = self.ctx.unwrap_iov(
             [
                 (sign_buffer_type, header),
                 body,
                 (sign_buffer_type, trailer),
                 (spnego.iov.BufferType.header, signature),
             ],
-            encrypt=True,
-            qop=None,
         )
 
         return res.buffers[1].data or b""

@@ -1,93 +1,10 @@
-import typing as t
+import base64
 
-from dpapi_ng._rpc._bind import ContextElement, SyntaxId
-from dpapi_ng._rpc._client import (
-    NDR,
-    NDR64,
-    bind_time_feature_negotiation,
-    create_rpc_connection,
+from dpapi_ng._client import ncrypt_unprotect_secret
+
+res = ncrypt_unprotect_secret(
+    base64.b16decode(
+        "3082044E06092A864886F70D010703A082043F3082043B02010231820407A2820403020104308203C50482036C010000004B44534B0300000069010000100000001F000000A84FC6BA90E87C91109083E7B0F85996080300001800000018000000444850420001000087A8E61DB4B6663CFFBBD19C651959998CEEF608660DD0F25D2CEED4435E3B00E00DF8F1D61957D4FAF7DF4561B2AA3016C3D91134096FAA3BF4296D830E9A7C209E0C6497517ABD5A8A9D306BCF67ED91F9E6725B4758C022E0B1EF4275BF7B6C5BFC11D45F9088B941F54EB1E59BB8BC39A0BF12307F5C4FDB70C581B23F76B63ACAE1CAA6B7902D52526735488A0EF13C6D9A51BFA4AB3AD8347796524D8EF6A167B5A41825D967E144E5140564251CCACB83E6B486F6B3CA3F7971506026C0B857F689962856DED4010ABD0BE621C3A3960A54E710C375F26375D7014103A4B54330C198AF126116D2276E11715F693877FAD7EF09CADB094AE91E1A15973FB32C9B73134D0B2E77506660EDBD484CA7B18F21EF205407F4793A1A0BA12510DBC15077BE463FFF4FED4AAC0BB555BE3A6C1B0C6B47B1BC3773BF7E8C6F62901228F8C28CBB18A55AE31341000A650196F931C77A57F2DDF463E5E9EC144B777DE62AAAB8A8628AC376D282D6ED3864E67982428EBC831D14348F6F2F9193B5045AF2767164E1DFC967C1FB3F2E55A4BD1BFFE83B9C80D052B985D182EA0ADB2A3B7313D3FE14C8484B1E052588B9B7D2BBD2DF016199ECD06E1557CD0915B3353BBB64E0EC377FD028370DF92B52C7891428CDC67EB6184B523D1DB246C32F63078490F00EF8D647D148D47954515E2327CFEF98C582664B4C0F6CC41659535CC9DB0F3BE1D18BA5D691DCBD7ADFC2A3F331E8875264BDB99B71F0DD0715ED1002DFFDC00BEA4A252738BFD027B283C0A61C3BA7A060732B2DBEC520BCA23941810CBC555A4C69F45F35C05EE02E71E3ACB6ED5B9B55F0DC408E13640CDC58A04900E73018ADBD7D5840DD29CB6482AF75483C22AF35A48AD0D166FADED4C1C58F749CD130BDB4726938FC6A90E17726D75B2284592AA292B52A97807B80355705794340702333C9558EC671DD206D9C796BC26953D7F7261776E69A2DA8496E3AD04877D645571BBCCE655CD57C53BFE3406B457B807BB497B79C99D0766DD3D19B594E98D5B685302171A02313DA5BE5F5F6D1B98BC6B9BF5B68992C1C64006F006D00610069006E002E007400650073007400000064006F006D00610069006E002E0074006500730074000000305306092B0601040182374A013046060A2B0601040182374A01013038303630340C035349440C2D532D312D352D32312D343135313830383739372D333433303536313039322D323834333436343538382D353132300B060960864801650304012D0428E6580A011EC5BCD3C18B458152D787E621B89242F2DF2897A389B23E77EF6369C3AB4A5CF01199BC302B06092A864886F70D010701301E060960864801650304012E3011040C1CC9941B71A56A7B41D80F5C0201100483281851105B313865D80D24A4ACEFD7AA3CC67D0C62ABCCDD23E4C456C8AE792CBAAC4B5534AB4B8715340C15423863490E32B5204C608E2F0245C3F26E185E124CC5A05F85CA80563119C2A32108B0AF59F2A839F1B5B90FAAECAD04BF34576E014217F18E2F97F3423ADCB2DF569E5B1D34BBF1CE7A6E36B8B1B51C3A5A8B0F4EF2E512B1ECC672386BD5A7E686C49C".upper()
+    )
 )
-from dpapi_ng._rpc._epm import EPM, EptMap, EptMapResult, build_tcpip_tower, TCPFloor
-from dpapi_ng._rpc._isd_key import ISD_KEY, GetKeyRequest
-from dpapi_ng._rpc._verification import VerificationTrailer, CommandPContext, CommandFlags
-
-with create_rpc_connection("dc01.domain.test") as rpc:
-    bind_ack = rpc.bind(
-        contexts=[
-            ContextElement(
-                context_id=0,
-                abstract_syntax=EPM,
-                transfer_syntaxes=[NDR],
-            ),
-            ContextElement(
-                context_id=1,
-                abstract_syntax=EPM,
-                transfer_syntaxes=[NDR64],
-            ),
-            ContextElement(
-                context_id=2,
-                abstract_syntax=EPM,
-                transfer_syntaxes=[bind_time_feature_negotiation()],
-            ),
-        ]
-    )
-
-    ept_map = EptMap(
-        obj=None,
-        tower=build_tcpip_tower(
-            service=ISD_KEY,
-            data_rep=NDR,
-            port=135,
-            addr=0,
-        ),
-        entry_handle=None,
-        max_towers=4,
-    )
-
-    resp = rpc.request(1, ept_map.opnum, ept_map.pack())
-    map_response = EptMapResult.unpack(resp.stub_data)
-    assert map_response.status == 0
-    assert isinstance(map_response.towers[0][3], TCPFloor)
-    isd_key_port = map_response.towers[0][3].port
-
-with create_rpc_connection(
-    "dc01.domain.test",
-    isd_key_port,
-    auth_protocol="negotiate",
-) as rpc:
-    bind_ack = rpc.bind(
-        contexts=[
-            ContextElement(
-                context_id=0,
-                abstract_syntax=ISD_KEY,
-                transfer_syntaxes=[NDR],
-            ),
-            ContextElement(
-                context_id=1,
-                abstract_syntax=ISD_KEY,
-                transfer_syntaxes=[NDR64],
-            ),
-            ContextElement(
-                context_id=2,
-                abstract_syntax=ISD_KEY,
-                transfer_syntaxes=[bind_time_feature_negotiation()],
-            ),
-        ]
-    )
-
-    target_sd = b""
-    get_key = GetKeyRequest(target_sd)
-    stub_data = get_key.pack()
-    stub_data += b"\x00" * (-len(stub_data) % 4)
-    stub_data += VerificationTrailer(
-        [
-            CommandPContext(
-                flags=CommandFlags.SEC_VT_COMMAND_END,
-                interface_id=ISD_KEY,
-                transfer_syntax=NDR64,
-            ),
-        ]
-    ).pack()
-
-    resp = rpc.request(1, get_key.opnum, stub_data)
-    a = ""
+print(res.decode("utf-16-le").rstrip("\00"))

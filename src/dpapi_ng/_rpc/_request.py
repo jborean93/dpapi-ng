@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import dataclasses
-import enum
 import typing as t
 import uuid
 
@@ -20,8 +19,8 @@ class Request(PDU):
     obj: t.Optional[uuid.UUID]
     stub_data: bytes
 
-    def pack(self) -> bytearray:
-        return bytearray().join(
+    def pack(self) -> bytes:
+        return b"".join(
             [
                 self.header.pack(),
                 self.alloc_hint.to_bytes(4, byteorder="little"),
@@ -71,8 +70,8 @@ class Response(PDU):
     cancel_count: int
     stub_data: bytes
 
-    def pack(self) -> bytearray:
-        return bytearray().join(
+    def pack(self) -> bytes:
+        return b"".join(
             [
                 self.header.pack(),
                 self.alloc_hint.to_bytes(4, byteorder="little"),

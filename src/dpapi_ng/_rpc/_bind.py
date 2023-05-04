@@ -11,6 +11,13 @@ import uuid
 from ._pdu import PDU, PacketType, PDUHeader, SecTrailer, register_pdu
 
 
+class BindTimeFeatureNegotiation(enum.IntFlag):
+    # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rpce/cef529cc-77b5-4794-85dc-91e1467e80f0
+    NONE = 0x00
+    SECURITY_CONTEXT_MULTIPLEXING = 0x01
+    KEEP_CONNECTION_ON_ORPHAN = 0x02
+
+
 @dataclasses.dataclass(frozen=True)
 class SyntaxId:
     uuid: uuid.UUID
@@ -130,8 +137,8 @@ class Bind(PDU):
     assoc_group: int
     contexts: t.List[ContextElement]
 
-    def pack(self) -> bytearray:
-        return bytearray().join(
+    def pack(self) -> bytes:
+        return b"".join(
             [
                 self.header.pack(),
                 self.max_xmit_frag.to_bytes(2, byteorder="little"),
@@ -184,7 +191,7 @@ class BindAck(PDU):
     sec_addr: str
     results: t.List[ContextResult]
 
-    def pack(self) -> bytearray:
+    def pack(self) -> bytes:
         b_sec_addr = b""
         if self.sec_addr:
             b_sec_addr = self.sec_addr.encode("utf-8") + b"\x00"
@@ -192,7 +199,7 @@ class BindAck(PDU):
         padding = -(2 + sec_addr_len) % 4
         b_result = b"".join([r.pack() for r in self.results])
 
-        return bytearray().join(
+        return b"".join(
             [
                 self.header.pack(),
                 self.max_xmit_frag.to_bytes(2, byteorder="little"),
@@ -249,7 +256,7 @@ class BindNak(PDU):
     reject_reason: int
     versions: t.List[tuple[int, int]]
 
-    def pack(self) -> bytearray:
+    def pack(self) -> bytes:
         protocols = [v[0].to_bytes(1, byteorder="little") + v[1].to_bytes(1, byteorder="little") for v in self.versions]
         b_versions = b"".join(
             [
@@ -259,7 +266,7 @@ class BindNak(PDU):
         )
         padding = -(2 + len(b_versions)) % 4
 
-        return bytearray().join(
+        return b"".join(
             [
                 self.header.pack(),
                 self.reject_reason.to_bytes(2, byteorder="little"),
@@ -318,3 +325,14 @@ class AlterContextResponse(BindAck):
         sec_trailer: t.Optional[SecTrailer],
     ) -> AlterContextResponse:
         return BindAck._unpack.__func__(cls, data, header, sec_trailer)  # type: ignore[attr-defined]
+
+
+def bind_time_feature_negotiation(
+    flags: BindTimeFeatureNegotiation = BindTimeFeatureNegotiation.NONE,
+) -> SyntaxId:
+    """Creates the Bind Time Feature Negotiation Syntax value from the flags specified."""
+    return SyntaxId(
+        uuid=uuid.UUID(fields=(0x6CB71C2C, 0x9812, 0x4540, flags, 0, 0)),
+        version=1,
+        version_minor=0,
+    )

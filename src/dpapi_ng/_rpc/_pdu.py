@@ -204,8 +204,8 @@ class PDU:
     header: PDUHeader
     sec_trailer: t.Optional[SecTrailer]
 
-    def pack(self) -> bytearray:
-        raise NotImplementedError()
+    def pack(self) -> bytes:
+        raise NotImplementedError()  # pragma: nocover
 
     @classmethod
     def unpack(
@@ -253,8 +253,8 @@ class Fault(PDU):
     flags: FaultFlags  # Extension of MS-RPCE
     stub_data: bytes
 
-    def pack(self) -> bytearray:
-        return bytearray().join(
+    def pack(self) -> bytes:
+        return b"".join(
             [
                 self.header.pack(),
                 self.alloc_hint.to_bytes(4, byteorder="little"),

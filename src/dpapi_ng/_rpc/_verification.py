@@ -8,8 +8,7 @@ import enum
 import typing as t
 
 from ._bind import SyntaxId
-from ._pdu import PacketType, DataRep
-
+from ._pdu import DataRep, PacketType
 
 # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rpce/0e9fea61-1bff-4478-9bfe-a3b6d8b64ac3
 
@@ -18,6 +17,13 @@ class CommandType(enum.IntEnum):
     SEC_VT_COMMAND_BITMASK_1 = 0x0001
     SEC_VT_COMMAND_PCONTEXT = 0x0002
     SEC_VT_COMMAND_HEADER2 = 0x0003
+
+    @classmethod
+    def _missing_(cls, value: object) -> t.Optional[enum.Enum]:
+        new_member = int.__new__(cls)
+        new_member._name_ = f"CommandType Unknown 0x{value:04X}"
+        new_member._value_ = value  # type: ignore[assignment]
+        return cls._value2member_map_.setdefault(value, new_member)
 
 
 class CommandFlags(enum.IntFlag):
@@ -69,7 +75,7 @@ _COMMAND_TYPE_REGISTRY: t.Dict[CommandType, t.Callable[[CommandFlags, bytes], Co
 
 
 def register_cmd(cls: T) -> T:
-    _COMMAND_TYPE_REGISTRY[getattr(cls, "command")] = getattr(cls, "_unpack")
+    _COMMAND_TYPE_REGISTRY[getattr(cls, "command").default] = getattr(cls, "_unpack")
     return cls
 
 
@@ -192,7 +198,7 @@ class VerificationTrailer:
         view = memoryview(data)
 
         if view[:8].tobytes() != cls.signature:
-            raise ValueError("Input data does not start with the expected signature")
+            raise ValueError(f"Failed to unpack {cls.__name__} as signature header is invalid")
 
         view = view[8:]
         commands = []

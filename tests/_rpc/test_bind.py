@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from dpapi_ng._rpc import _bind as bind
 from dpapi_ng._rpc import _pdu as pdu
 
@@ -759,3 +761,33 @@ def test_alter_context_resp_unpack() -> None:
     assert msg.sec_trailer.pad_length == 0
     assert msg.sec_trailer.context_id == 0
     assert msg.sec_trailer.auth_value == b"\xa1\x27\x30\x25"
+
+
+@pytest.mark.parametrize(
+    "flags, expected",
+    [
+        (bind.BindTimeFeatureNegotiation.NONE, "6cb71c2c-9812-4540-0000-000000000000"),
+        (bind.BindTimeFeatureNegotiation.SECURITY_CONTEXT_MULTIPLEXING, "6cb71c2c-9812-4540-0100-000000000000"),
+        (bind.BindTimeFeatureNegotiation.KEEP_CONNECTION_ON_ORPHAN, "6cb71c2c-9812-4540-0200-000000000000"),
+        (
+            bind.BindTimeFeatureNegotiation.SECURITY_CONTEXT_MULTIPLEXING
+            | bind.BindTimeFeatureNegotiation.KEEP_CONNECTION_ON_ORPHAN,
+            "6cb71c2c-9812-4540-0300-000000000000",
+        ),
+    ],
+    ids=[
+        "NONE",
+        "SECURITY_CONTEXT_MULTIPLEXING",
+        "KEEP_CONNECTION_ON_ORPHAN",
+        "SECURITY_CONTEXT_MULTIPLEXING|KEEP_CONNECTION_ON_ORPHAN",
+    ],
+)
+def test_bind_time_feature_negotiation(
+    flags: bind.BindTimeFeatureNegotiation,
+    expected: str,
+) -> None:
+    actual = bind.bind_time_feature_negotiation(flags)
+
+    assert actual.uuid == uuid.UUID(expected)
+    assert actual.version == 1
+    assert actual.version_minor == 0
