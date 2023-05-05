@@ -326,8 +326,8 @@ class ECDHKey:
     this struct is defined in `MS-GKDI 2.2.3.2 ECDH Key`_.
 
     Args:
-        curve: The curve name used, currently only the curves P256, P384, P521
-            are supported.
+        curve_name: The curve name used, currently only the curves P256, P384,
+            P521 are supported.
         key_length: The length of the public key.
         x: The X coordinate of the point P.
         y: The Y coordinate of the point P.
@@ -337,10 +337,18 @@ class ECDHKey:
     """
 
     magic: bytes = dataclasses.field(init=False, repr=False, default=b"\x45\x43\x4B")
-    curve: str
+    curve_name: str
     key_length: int
     x: int
     y: int
+
+    @property
+    def curve(self) -> ec.EllipticCurve:
+        return {
+            "P256": ec.SECP256R1(),
+            "P384": ec.SECP384R1(),
+            "P521": ec.SECP521R1(),
+        }[self.curve_name]
 
     def pack(self) -> bytes:
         b_x = self.x.to_bytes((self.x.bit_length() + 7) // 8, byteorder="big")
@@ -349,9 +357,9 @@ class ECDHKey:
             "P256": b"\x45\x43\x4B\x31",
             "P384": b"\x45\x43\x4B\x33",
             "P521": b"\x45\x43\x4B\x35",
-        }.get(self.curve, None)
+        }.get(self.curve_name, None)
         if not b_curve:
-            raise ValueError(f"Unknown curve '{self.curve}', cannot pack.")
+            raise ValueError(f"Unknown curve '{self.curve_name}', cannot pack.")
 
         return b"".join(
             [
@@ -386,7 +394,7 @@ class ECDHKey:
         y = view[:length].tobytes()
 
         return ECDHKey(
-            curve=curve,
+            curve_name=curve,
             key_length=length,
             x=int.from_bytes(x, byteorder="big"),
             y=int.from_bytes(y, byteorder="big"),
@@ -510,7 +518,13 @@ class GroupKeyEnvelope:
             )
 
         else:
-            return compute_kek_from_context(hash_algo, l2_key, key_id.key_info)
+            return kdf(
+                hash_algo,
+                l2_key,
+                KDS_SERVICE_LABEL,
+                key_id.key_info,
+                32,
+            )
 
     @classmethod
     def unpack(
@@ -689,9 +703,6 @@ def compute_kek_from_public_key(
     )
 
     if secret_algorithm == "DH":
-        # dh_parameters = FFCDHParameters.unpack(secret_parameters)
-        # assert dh_parameters.key_length == (rk.public_key_length // 8)
-
         # We can derive the shared secret based on the DH formula.
         # s = y**x mod p
         dh_pub_key = FFCDHKey.unpack(public_key)
@@ -702,16 +713,9 @@ def compute_kek_from_public_key(
         )
         shared_secret = shared_secret_int.to_bytes((shared_secret_int.bit_length() + 7) // 8, byteorder="big")
 
-    elif secret_algorithm in ["ECDH_P256", "ECDH_P384", "ECDH_P521"]:
-        # assert not secret_parameters
-
-        curve: ec.EllipticCurve = {
-            "ECDH_P256": ec.SECP256R1(),
-            "ECDH_P384": ec.SECP384R1(),
-            "ECDH_P521": ec.SECP521R1(),
-        }[secret_algorithm]
-
+    elif secret_algorithm.startswith("ECDH_P"):
         ecdh_pub_key_info = ECDHKey.unpack(public_key)
+        curve = ecdh_pub_key_info.curve
 
         ecdh_pub_key = ec.EllipticCurvePublicNumbers(ecdh_pub_key_info.x, ecdh_pub_key_info.y, curve).public_key()
         ecdh_private = ec.derive_private_key(
@@ -746,19 +750,5 @@ def compute_kek_from_public_key(
         secret,
         KDS_SERVICE_LABEL,
         kek_context,
-        32,
-    )
-
-
-def compute_kek_from_context(
-    algorithm: hashes.HashAlgorithm,
-    secret: bytes,
-    context: bytes,
-) -> bytes:
-    return kdf(
-        algorithm,
-        secret,
-        KDS_SERVICE_LABEL,
-        context,
         32,
     )

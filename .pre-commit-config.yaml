@@ -15,4 +15,5 @@ repos:
   - id: mypy
     exclude: ^setup.py|build/
     additional_dependencies:
+    - dnspython
     - types-cryptography

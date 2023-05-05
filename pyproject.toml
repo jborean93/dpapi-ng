@@ -25,10 +25,16 @@ classifiers = [
     "Programming Language :: Python :: 3.11"
 ]
 dependencies = [
+    "dnspython >= 2.0.0",  # Needed for DC lookup support
     "cryptography",
     "pyspnego >= 0.9.0",  # Needed for DCE support
 ]
 dynamic = ["version"]
+
+[project.optional-dependencies]
+kerberos = [
+    "pyspnego[kerberos] >= 0.9.0"
+]
 
 [project.urls]
 homepage = "https://github.com/jborean93/dpapi-ng"
