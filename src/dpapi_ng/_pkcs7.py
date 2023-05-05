@@ -4,9 +4,7 @@
 from __future__ import annotations
 
 import dataclasses
-import struct
 import typing as t
-import uuid
 
 from ._asn1 import ASN1Header, ASN1Reader, ASN1Tag, TagClass, TypeTagNumber
 

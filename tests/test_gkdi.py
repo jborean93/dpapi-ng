@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from dpapi_ng import _isd_key as isd_key
+from dpapi_ng import _gkdi as gkdi
 
 
 def test_get_key_pack() -> None:
@@ -22,7 +22,7 @@ def test_get_key_pack() -> None:
         b"\x1f\x00\x00\x00"
     )
 
-    msg = isd_key.GetKey(
+    msg = gkdi.GetKey(
         target_sd=b"\x01\x02\x03\x04",
         root_key_id=uuid.UUID("73294420-917f-416a-9ec3-86082afafb9e"),
         l0_key_id=-1,
@@ -44,8 +44,8 @@ def test_get_key_unpack() -> None:
         b"\xff\xff\xff\xff\x01\x00\x00\x00"
         b"\x1f\x00\x00\x00"
     )
-    resp = isd_key.GetKey.unpack(data)
-    assert isinstance(resp, isd_key.GetKey)
+    resp = gkdi.GetKey.unpack(data)
+    assert isinstance(resp, gkdi.GetKey)
     assert resp.target_sd == b"\x01\x02\x03\x04"
     assert resp.root_key_id == uuid.UUID("73294420-917f-416a-9ec3-86082afafb9e")
     assert resp.l0_key_id == -1
@@ -63,7 +63,7 @@ def test_get_key_pack_no_root_key() -> None:
         b"\x1f\x00\x00\x00"
     )
 
-    msg = isd_key.GetKey(
+    msg = gkdi.GetKey(
         target_sd=b"\x01\x02\x03\x04",
         root_key_id=None,
         l0_key_id=-1,
@@ -83,8 +83,8 @@ def test_get_key_unpack_no_root_key() -> None:
         b"\xff\xff\xff\xff\x01\x00\x00\x00"
         b"\x1f\x00\x00\x00"
     )
-    resp = isd_key.GetKey.unpack(data)
-    assert isinstance(resp, isd_key.GetKey)
+    resp = gkdi.GetKey.unpack(data)
+    assert isinstance(resp, gkdi.GetKey)
     assert resp.target_sd == b"\x01\x02\x03\x04"
     assert resp.root_key_id is None
     assert resp.l0_key_id == -1
@@ -93,15 +93,17 @@ def test_get_key_unpack_no_root_key() -> None:
 
 
 def test_get_key_unpack_response() -> None:
+    expected = gkdi.GroupKeyEnvelope(1, 0, 0, 0, 0, uuid.UUID(int=0), "", b"", "", b"", 0, 0, "", "", b"", b"")
+    b_expected = expected.pack()
     data = (
-        b"\x04\x00\x00\x00\x00\x00\x00\x00"
-        b"\x00\x00\x00\x00\x00\x00\x00\x00"
-        b"\x04\x00\x00\x00\x00\x00\x00\x00"
-        b"\x01\x02\x03\x04\x00\x00\x00\x00"
+        len(b_expected).to_bytes(4, byteorder="little")
+        + (b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04\x00\x00\x00\x00\x00\x00\x00")
+        + b_expected
+        + b"\x00\x00\x00\x00"
     )
-    expected = b"\x01\x02\x03\x04"
 
-    actual = isd_key.GetKey.unpack_response(data)
+    actual = gkdi.GetKey.unpack_response(data)
+    assert isinstance(actual, gkdi.GroupKeyEnvelope)
     assert actual == expected
 
 
@@ -109,4 +111,4 @@ def test_get_key_unpack_response_fail() -> None:
     data = b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x57\x00\x07\x80"
 
     with pytest.raises(Exception, match="GetKey failed 0x80070057"):
-        isd_key.GetKey.unpack_response(data)
+        gkdi.GetKey.unpack_response(data)
