@@ -165,7 +165,7 @@ class KDFParameters:
         elif self.hash_name == "SHA512":
             return hashes.SHA512()
         else:
-            raise Exception(f"Unsupported hash algorithm {self.hash_name}")
+            raise NotImplementedError(f"Unsupported hash algorithm {self.hash_name}")
 
     def pack(self) -> bytes:
         b_hash_name = (self.hash_name + "\00").encode("utf-16-le")
@@ -238,7 +238,7 @@ class FFCDHParameters:
         view = memoryview(data)
 
         # length = int.from_bytes(view[:4], byteorder="little")
-        if view[4:8].tobytes() != b"\x44\x48\x50\x4d":
+        if view[4:8].tobytes() != cls.magic:
             raise ValueError(f"Failed to unpack {cls.__name__} as magic identifier is invalid")
 
         key_length = int.from_bytes(view[8:12], byteorder="little")
@@ -703,6 +703,7 @@ def compute_kek_from_public_key(
     )
 
     if secret_algorithm == "DH":
+        p = FFCDHParameters.unpack(secret_parameters or b"")
         # We can derive the shared secret based on the DH formula.
         # s = y**x mod p
         dh_pub_key = FFCDHKey.unpack(public_key)
