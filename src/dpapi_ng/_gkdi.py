@@ -599,6 +599,45 @@ class GroupKeyEnvelope:
         )
 
 
+def compute_l1_key(
+    target_sd: bytes,
+    root_key_id: uuid.UUID,
+    l0: int,
+    root_key: bytes,
+    algorithm: hashes.HashAlgorithm,
+) -> bytes:
+    # Note: 512 is number of bits, we use byte length here
+    # Key(SD, RK, L0, -1, -1) = KDF(
+    #   HashAlg,
+    #   RK.msKds-RootKeyData,
+    #   "KDS service",
+    #   RKID || L0 || 0xffffffff || 0xffffffff,
+    #   512
+    # )
+    l0_seed = kdf(
+        algorithm,
+        root_key,
+        KDS_SERVICE_LABEL,
+        compute_kdf_context(root_key_id, l0, -1, -1),
+        64,
+    )
+
+    # Key(SD, RK, L0, 31, -1) = KDF(
+    #   HashAlg,
+    #   Key(SD, RK, L0, -1, -1),
+    #   "KDS service",
+    #   RKID || L0 || 31 || 0xffffffff || SD,
+    #   512
+    # )
+    return kdf(
+        algorithm,
+        l0_seed,
+        KDS_SERVICE_LABEL,
+        compute_kdf_context(root_key_id, l0, 31, -1) + target_sd,
+        64,
+    )
+
+
 def compute_l2_key(
     algorithm: hashes.HashAlgorithm,
     request: KeyIdentifier,
