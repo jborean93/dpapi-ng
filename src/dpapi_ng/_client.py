@@ -479,10 +479,6 @@ def ncrypt_unprotect_secret(
     """
     blob = DPAPINGBlob.unpack(data)
 
-    if not server:
-        srv = lookup_dc(blob.key_identifier.domain_name)
-        server = srv.target
-
     cache = cache or KeyCache()
     rk = cache._get_key(
         blob.security_descriptor,
@@ -492,6 +488,10 @@ def ncrypt_unprotect_secret(
         blob.key_identifier.l2,
     )
     if not rk:
+        if not server:
+            srv = lookup_dc(blob.key_identifier.domain_name)
+            server = srv.target
+
         rk = _sync_get_key(
             server,
             blob.security_descriptor,
@@ -557,10 +557,6 @@ async def async_ncrypt_unprotect_secret(
     """
     blob = DPAPINGBlob.unpack(data)
 
-    if not server:
-        srv = await async_lookup_dc(blob.key_identifier.domain_name)
-        server = srv.target
-
     cache = cache or KeyCache()
     rk = cache._get_key(
         blob.security_descriptor,
@@ -570,6 +566,10 @@ async def async_ncrypt_unprotect_secret(
         blob.key_identifier.l2,
     )
     if not rk:
+        if not server:
+            srv = await async_lookup_dc(blob.key_identifier.domain_name)
+            server = srv.target
+
         rk = await _async_get_key(
             server,
             blob.security_descriptor,

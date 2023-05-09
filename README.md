@@ -178,3 +178,14 @@ dpapi_ng.ncrypt_unprotect_secret(b"...", cache=cache)
 
 Currently the `SP800_108_CTR_HMAC` KDF algorithm and `DH`, `ECDH_P256`, and `ECDH_P384` secret agreement algorithms have been tested to work.
 The `ECDH_P521` secret agreement algorithm should also work but has been untested as a test environment cannot be created with it right now.
+
+## Special Thanks
+
+I would like to thank the following people (Twitter handles in brackets) for their help on this project:
+
+* Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski for providing more information on the internal BCrypt* API workflow used in DPAPI-NG
+* Marc-André Moreau (@awakecoding) for their help with reverse engineering some of the Windows APIs and talking through some theories
+* SkelSec (@SkelSec) for help on the RPC calls and being available as a general sounding board for my theories
+* Steve Syfuhs (@SteveSyfuhs) for connecting me with some Microsoft engineers to help understand some undocumented logic
+
+Without their patience and knowledge this probably would not have been possible.

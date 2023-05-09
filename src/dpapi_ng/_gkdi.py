@@ -733,6 +733,10 @@ def compute_kek_from_public_key(
     public_key: bytes,
     private_key_length: int,
 ) -> bytes:
+    # Special thanks for Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski
+    # for providing access to CQDPAPINGPFXDecrypter.exe which contains the
+    # BCrypt* APIs Microsoft use to derive the KEK.
+
     private_key = kdf(
         algorithm,
         seed,
