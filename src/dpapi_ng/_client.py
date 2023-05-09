@@ -130,7 +130,8 @@ async def _async_get_key(
     password: t.Optional[str] = None,
     auth_protocol: str = "negotiate",
 ) -> GroupKeyEnvelope:
-    async with (await async_create_rpc_connection(server) as rpc):
+    rpc = await async_create_rpc_connection(server)
+    async with rpc:
         context_id = _EPM_CONTEXTS[0].context_id
         ack = await rpc.bind(contexts=_EPM_CONTEXTS)
         _process_bind_result(_EPM_CONTEXTS, ack, context_id)
@@ -139,15 +140,14 @@ async def _async_get_key(
         resp = await rpc.request(context_id, ept_map.opnum, ept_map.pack())
         isd_key_port = _process_ept_map_result(resp)
 
-    async with (
-        await async_create_rpc_connection(
-            server,
-            isd_key_port,
-            username=username,
-            password=password,
-            auth_protocol=auth_protocol,
-        ) as rpc
-    ):
+    rpc = await async_create_rpc_connection(
+        server,
+        isd_key_port,
+        username=username,
+        password=password,
+        auth_protocol=auth_protocol,
+    )
+    async with rpc:
         context_id = _ISD_KEY_CONTEXTS[0].context_id
         ack = await rpc.bind(contexts=_ISD_KEY_CONTEXTS)
         _process_bind_result(_ISD_KEY_CONTEXTS, ack, context_id)

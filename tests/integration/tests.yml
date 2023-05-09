@@ -1,0 +1,60 @@
+- name: run integration tests on Windows
+  hosts: APP01
+  gather_facts: false
+  tags:
+  - windows
+
+  tasks:
+  - name: template out tests
+    ansible.windows.win_template:
+      src: test_integration.py
+      dest: C:\temp\test_integration.py
+
+  - name: run integration tests as a normal user account
+    ansible.windows.win_command:
+      argv:
+      - C:\temp\venv\{{ item | win_basename }}\Scripts\python.exe
+      - -m
+      - pytest
+      - C:\temp\test_integration.py
+      - -v
+    with_items: '{{ python_interpreters }}'
+    become: yes
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+- name: run integration tests on Linux
+  hosts: linux
+  gather_facts: false
+  tags:
+  - linux
+
+  tasks:
+  - name: template out tests
+    ansible.builtin.template:
+      src: test_integration.py
+      dest: ~/test_integration.py
+
+  - name: get Kerberos ticket
+    ansible.builtin.command:
+      argv:
+      - kinit
+      - -k
+      - -t
+      - ~/user.keytab
+      - '{{ domain_user_upn }}'
+    environment:
+      KRB5CCNAME: /tmp/krb5.ccache
+
+  - name: run integration tests
+    ansible.builtin.command:
+      argv:
+      - ~/venv/dpapi-ng/bin/python
+      - -m
+      - pytest
+      - ~/test_integration.py
+      - -v
+    environment:
+      KRB5CCNAME: /tmp/krb5.ccache

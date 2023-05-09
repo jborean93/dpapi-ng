@@ -13,15 +13,15 @@ all:
         ansible_port: 5985
         python_interpreters:
         - C:\Program Files\Python37
-        - C:\Program Files (x86)\Python37-32
-        - C:\Program Files\Python38
-        - C:\Program Files (x86)\Python38-32
-        - C:\Program Files\Python39
-        - C:\Program Files (x86)\Python39-32
-        - C:\Program Files\Python310
-        - C:\Program Files (x86)\Python310-32
-        - C:\Program Files\Python311
-        - C:\Program Files (x86)\Python311-32
+        # - C:\Program Files (x86)\Python37-32
+        # - C:\Program Files\Python38
+        # - C:\Program Files (x86)\Python38-32
+        # - C:\Program Files\Python39
+        # - C:\Program Files (x86)\Python39-32
+        # - C:\Program Files\Python310
+        # - C:\Program Files (x86)\Python310-32
+        # - C:\Program Files\Python311
+        # - C:\Program Files (x86)\Python311-32
 
     linux:
       hosts:

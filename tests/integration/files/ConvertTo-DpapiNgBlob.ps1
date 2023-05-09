@@ -44,7 +44,7 @@ if ($res) {
 try {
     $encBlob = [byte[]]::new($blobLength)
     [System.Runtime.InteropServices.Marshal]::Copy($blob, $encBlob, 0, $encBlob.Length)
-    [System.Convert]::ToHexString($encBlob)
+    $encBlob
 }
 finally {
     [System.Runtime.InteropServices.Marshal]::FreeHGlobal($blob)

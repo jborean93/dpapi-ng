@@ -23,7 +23,8 @@ def _get_highest_answer(
     for a in answer:
         answers.append(
             SrvRecord(
-                target=str(a.target),
+                # The trailing . causes errors on Windows and the SPN lookup.
+                target=str(a.target).rstrip("."),
                 port=a.port,
                 weight=a.weight,
                 priority=a.priority,

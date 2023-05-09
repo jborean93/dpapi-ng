@@ -29,8 +29,8 @@ class AuthenticationProvider:
         )
         self.provider = {
             "negotiate": SecurityProvider.RPC_C_AUTHN_GSS_NEGOTIATE,
-            "ntlm": SecurityProvider.RPC_C_AUTHN_GSS_KERBEROS,
-            "kerberos": SecurityProvider.RPC_C_AUTHN_WINNT,
+            "ntlm": SecurityProvider.RPC_C_AUTHN_WINNT,
+            "kerberos": SecurityProvider.RPC_C_AUTHN_GSS_KERBEROS,
         }[protocol]
         self._header_length = 0
 

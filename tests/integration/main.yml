@@ -104,6 +104,61 @@
       ansible_become_user: '{{ domain_user_upn }}'
       ansible_become_pass: '{{ domain_password }}'
 
+  - name: create test blob as same user
+    ansible.windows.win_powershell:
+      script: |
+        param ()
+
+        $ErrorActionPreference = 'Stop'
+
+        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+        $blobPath = 'C:\temp\blob-user'
+        if (Test-Path -LiteralPath $blobPath) {
+            $blob = Get-Content -LiteralPath $blobPath -Raw
+            $Ansible.Changed = $false
+        }
+        else {
+            $blobBytes = . C:\temp\ConvertTo-DpapiNgBlob.ps1 -InputObject ([byte[]]@(0))
+            $blob = [System.Convert]::ToBase64String($blobBytes)
+            Set-Content -LiteralPath $blobPath -Value $blob
+        }
+
+        $blob
+        $user.Value
+    register: blob_same_user
+    become: true
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+  - name: create test blob as different user
+    ansible.windows.win_powershell:
+      parameters:
+        ProtectionDescriptor: SID={{ blob_same_user.output[1] }}
+      script: |
+        param ($ProtectionDescriptor)
+
+        $ErrorActionPreference = 'Stop'
+
+        $blobPath = 'C:\temp\blob-different'
+        if (Test-Path -LiteralPath $blobPath) {
+            $blob = Get-Content -LiteralPath $blobPath -Raw
+            $Ansible.Changed = $false
+        }
+        else {
+            $blobBytes = . C:\temp\ConvertTo-DpapiNgBlob.ps1 -InputObject ([byte[]]@(0)) -ProtectionDescriptor $ProtectionDescriptor
+            $blob = [System.Convert]::ToBase64String($blobBytes)
+            Set-Content -LiteralPath $blobPath -Value $blob
+        }
+
+        $blob
+    register: blob_different_user
+    become: true
+    become_method: runas
+    vars:
+      ansible_become_user: SYSTEM
+
 # Use the following to get a snaphot of programs installed and their product_ids
 # 'SOFTWARE', 'SOFTWARE\Wow6432Node' | ForEach-Object {
 #       $getParams = @{
@@ -178,53 +233,53 @@
       creates: c:\temp\venv\{{ item | win_basename }}
     with_items: '{{ python_interpreters }}'
 
-  # - name: copy across wheel artifacts
-  #   ansible.windows.win_copy:
-  #     src: artifact.zip
-  #     dest: C:\temp\wheels.zip
+  - name: copy across wheel artifacts
+    ansible.windows.win_copy:
+      src: artifact.zip
+      dest: C:\temp\wheels.zip
 
-  # - name: ensure wheel dir exists
-  #   ansible.windows.win_file:
-  #     path: C:\temp\wheels
-  #     state: directory
+  - name: ensure wheel dir exists
+    ansible.windows.win_file:
+      path: C:\temp\wheels
+      state: directory
 
-  # - name: extract wheel from archive
-  #   community.windows.win_unzip:
-  #     src: C:\temp\wheels.zip
-  #     dest: C:\temp\wheels
+  - name: extract wheel from archive
+    community.windows.win_unzip:
+      src: C:\temp\wheels.zip
+      dest: C:\temp\wheels
 
-  # - name: get dpapi_ng artifact sdist filename
-  #   ansible.windows.win_find:
-  #     paths: C:\temp\wheels
-  #     patterns: 'sansldap-*.tar.gz'
-  #     use_regex: false
-  #   register: sansldap_sdist_file
+  - name: get dpapi_ng artifact sdist filename
+    ansible.windows.win_find:
+      paths: C:\temp\wheels
+      patterns: 'dpapi-ng-*.tar.gz'
+      use_regex: false
+    register: dpapi_ng_sdist_file
 
-  # - name: verify sdist was found
-  #   assert:
-  #     that:
-  #     - sansldap_sdist_file.files | count == 1
+  - name: verify sdist was found
+    assert:
+      that:
+      - dpapi_ng_sdist_file.files | count == 1
 
-  # - name: get sansldap artifact version
-  #   set_fact:
-  #     sansldap_version: >-
-  #       {{ sansldap_sdist_file.files[0].filename | regex_replace('sansldap-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+  - name: get dpapi-ng artifact version
+    set_fact:
+      dpapi_ng_version: >-
+        {{ dpapi_ng_sdist_file.files[0].filename | regex_replace('dpapi-ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
 
-  # - name: install sansldap into virtualenv
-  #   ansible.windows.win_command:
-  #     argv:
-  #     - c:\temp\venv\{{ item | win_basename }}\Scripts\python.exe
-  #     - -m
-  #     - pip
-  #     - install
-  #     - sansldap=={{ sansldap_version }}
-  #     - pyspnego[kerberos]
-  #     - pytest
-  #     - pytest-asyncio
-  #     - --find-links=C:/temp/wheels
-  #   args:
-  #     creates: c:\temp\venv\{{ item | win_basename }}\Lib\site-packages\sansldap
-  #   with_items: '{{ python_interpreters }}'
+  - name: install dpapi-ng into virtualenv
+    ansible.windows.win_command:
+      argv:
+      - c:\temp\venv\{{ item | win_basename }}\Scripts\python.exe
+      - -m
+      - pip
+      - install
+      - dpapi-ng=={{ dpapi_ng_version }}
+      - pyspnego[kerberos]
+      - pytest
+      - pytest-asyncio
+      - --find-links=C:/temp/wheels
+    args:
+      creates: c:\temp\venv\{{ item | win_basename }}\Lib\site-packages\dpapi_ng
+    with_items: '{{ python_interpreters }}'
 
 - name: set up Linux host
   hosts: linux
@@ -324,45 +379,56 @@
     become: false
     when: krb_provider == 'heimdal'
 
-  # - name: ensure wheel dir exists
-  #   ansible.builtin.file:
-  #     path: ~/wheels
-  #     state: directory
-  #   become: false
+  - name: create DPAPI-NG blob files
+    ansible.builtin.copy:
+      content: '{{ item.content }}'
+      dest: ~/{{ item.name }}
+    become: false
+    loop:
+    - content: '{{ hostvars["APP01"]["blob_same_user"]["output"][0] }}'
+      name: blob-user
+    - content: '{{ hostvars["APP01"]["blob_different_user"]["output"][0] }}'
+      name: blob-different
 
-  # - name: extract wheel artifacts
-  #   ansible.builtin.unarchive:
-  #     src: artifact.zip
-  #     dest: ~/wheels
-  #   become: false
+  - name: ensure wheel dir exists
+    ansible.builtin.file:
+      path: ~/wheels
+      state: directory
+    become: false
 
-  # - name: get sansldap artifact sdist filename
-  #   ansible.builtin.find:
-  #     paths: ~/wheels
-  #     patterns: 'sansldap-*.tar.gz'
-  #     recurse: false
-  #     file_type: file
-  #   become: false
-  #   register: sansldap_sdist_file
+  - name: extract wheel artifacts
+    ansible.builtin.unarchive:
+      src: artifact.zip
+      dest: ~/wheels
+    become: false
 
-  # - name: verify sdist was found
-  #   assert:
-  #     that:
-  #     - sansldap_sdist_file.files | count == 1
+  - name: get dpapi-ng artifact sdist filename
+    ansible.builtin.find:
+      paths: ~/wheels
+      patterns: 'dpapi-ng-*.tar.gz'
+      recurse: false
+      file_type: file
+    become: false
+    register: dpapi_ng_sdist_file
 
-  # - name: get sansldap artifact version
-  #   set_fact:
-  #     sansldap_version: >-
-  #       {{ sansldap_sdist_file.files[0].path | basename | regex_replace('sansldap-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+  - name: verify sdist was found
+    assert:
+      that:
+      - dpapi_ng_sdist_file.files | count == 1
 
-  # - name: create a virtualenv for each Python interpeter
-  #   ansible.builtin.pip:
-  #     name:
-  #     - sansldap=={{ sansldap_version }}
-  #     - pyspnego[kerberos]
-  #     - pytest
-  #     - pytest-asyncio
-  #     virtualenv: ~/venv/sansldap
-  #     virtualenv_command: /usr/bin/python3 -m venv
-  #     extra_args: --find-links file:///{{ sansldap_sdist_file.files[0].path | dirname }}
-  #   become: false
+  - name: get dpapi-ng artifact version
+    set_fact:
+      dpapi_ng_version: >-
+        {{ dpapi_ng_sdist_file.files[0].path | basename | regex_replace('dpapi-ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+
+  - name: create a virtualenv for each Python interpreter
+    ansible.builtin.pip:
+      name:
+      - dpapi-ng=={{ dpapi_ng_version }}
+      - pyspnego[kerberos]
+      - pytest
+      - pytest-asyncio
+      virtualenv: ~/venv/dpapi-ng
+      virtualenv_command: /usr/bin/python3 -m venv
+      extra_args: --find-links file:///{{ dpapi_ng_sdist_file.files[0].path | dirname }}
+    become: false
