@@ -128,7 +128,7 @@ class GetKey:
         hresult = int.from_bytes(view[-4:], byteorder="little")
         view = view[:-4]
         if hresult != 0:
-            raise Exception(f"GetKey failed 0x{hresult:08X}")
+            raise ValueError(f"GetKey failed 0x{hresult:08X}")
 
         key_length = int.from_bytes(view[:4], byteorder="little")
         view = view[8:]  # Skip padding as well
@@ -322,7 +322,7 @@ class FFCDHKey:
 class ECDHKey:
     """ECDH Key
 
-    Teh elliptic curve Diffie-Hellman (ECDH) public key info. The format of
+    The elliptic curve Diffie-Hellman (ECDH) public key info. The format of
     this struct is defined in `MS-GKDI 2.2.3.2 ECDH Key`_.
 
     Args:
@@ -343,11 +343,11 @@ class ECDHKey:
     y: int
 
     @property
-    def curve(self) -> ec.EllipticCurve:
+    def curve_and_hash(self) -> tuple[ec.EllipticCurve, hashes.HashAlgorithm]:
         return {
-            "P256": ec.SECP256R1(),
-            "P384": ec.SECP384R1(),
-            "P521": ec.SECP521R1(),
+            "P256": (ec.SECP256R1(), hashes.SHA256()),
+            "P384": (ec.SECP384R1(), hashes.SHA384()),
+            "P521": (ec.SECP521R1(), hashes.SHA512()),
         }[self.curve_name]
 
     def pack(self) -> bytes:
@@ -496,9 +496,9 @@ class GroupKeyEnvelope:
         key_id: KeyIdentifier,
     ) -> bytes:
         if self.is_public_key:
-            raise ValueError(f"Current user is not authorized to retrieve the KEK information")
+            raise ValueError("Current user is not authorized to retrieve the KEK information")
         if self.l0 != key_id.l0:
-            raise ValueError(f"L0 index {self.l0} does not match requested L0 index {key_id.l0}")
+            raise ValueError(f"L0 index {self.l0} does not match the requested L0 index {key_id.l0}")
 
         if self.kdf_algorithm != "SP800_108_CTR_HMAC":
             raise NotImplementedError(f"Unknown KDF algorithm '{self.kdf_algorithm}'")
@@ -741,8 +741,9 @@ def compute_kek_from_public_key(
         private_key_length,
     )
 
+    secret_hash_algorithm: hashes.HashAlgorithm
     if secret_algorithm == "DH":
-        p = FFCDHParameters.unpack(secret_parameters or b"")
+        # p = FFCDHParameters.unpack(secret_parameters or b"")
         # We can derive the shared secret based on the DH formula.
         # s = y**x mod p
         dh_pub_key = FFCDHKey.unpack(public_key)
@@ -752,10 +753,11 @@ def compute_kek_from_public_key(
             dh_pub_key.field_order,
         )
         shared_secret = shared_secret_int.to_bytes((shared_secret_int.bit_length() + 7) // 8, byteorder="big")
+        secret_hash_algorithm = hashes.SHA256()
 
     elif secret_algorithm.startswith("ECDH_P"):
         ecdh_pub_key_info = ECDHKey.unpack(public_key)
-        curve = ecdh_pub_key_info.curve
+        curve, secret_hash_algorithm = ecdh_pub_key_info.curve_and_hash
 
         ecdh_pub_key = ec.EllipticCurvePublicNumbers(ecdh_pub_key_info.x, ecdh_pub_key_info.y, curve).public_key()
         ecdh_private = ec.derive_private_key(
@@ -765,24 +767,24 @@ def compute_kek_from_public_key(
         shared_secret = ecdh_private.exchange(ec.ECDH(), ecdh_pub_key)
 
     else:
-        raise NotImplementedError(f"Unknown secret algorithm '{secret_algorithm}'")
+        raise NotImplementedError(f"Unknown secret agreement algorithm '{secret_algorithm}'")
 
-    # This part isn't documented but we use the
-    # key derivation algorithm SP 800-56A to derive the kek secret input
-    # value. On Windows this uses BCryptDeriveKey which has a hardcoded hash
-    # of SHA256 internally regardless of the configured KDF algorithm. The
-    # other info is comprised of the following UTF-16-LE encoded NULL
-    # terminated strings:
+    # This part isn't documented but we use the key derivation algorithm
+    # SP 800-56A to derive the kek secret input value. On Windows this uses
+    # BCryptDeriveKey with the following parameters.
     #   KDF_ALGORITHMID - SHA512
     #   KDF_PARTYUINFO  - KDS public key
     #   KDF_PARTYVINFO  - KDS service
+    # Each of these is just appended to the otherinfo value used in
+    # cryptography as the UTF-16-LE NULL terminated strings.
     kek_context = "KDS public key\0".encode("utf-16-le")
     secret = kdf_concat(
+        secret_hash_algorithm,
         shared_secret,
         algorithm_id="SHA512\0".encode("utf-16-le"),
         party_uinfo=kek_context,
         party_vinfo=KDS_SERVICE_LABEL,
-        length=32,
+        length=secret_hash_algorithm.digest_size,
     )
 
     return kdf(

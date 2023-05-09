@@ -3,5 +3,6 @@ isort == 5.11.5
 mypy == 1.2.0
 pre-commit
 pytest
+pytest-asyncio
 pytest-cov
 types-cryptography

@@ -89,7 +89,7 @@ def _process_bind_result(
             accepted_ids.append(ctx.context_id)
 
     if desired_context not in accepted_ids:
-        raise Exception("Failed to bind to desired context")
+        raise ValueError("Failed to bind to desired context")
 
     return
 
@@ -99,14 +99,14 @@ def _process_ept_map_result(
 ) -> int:
     map_response = EptMapResult.unpack(response.stub_data)
     if map_response.status != 0:
-        raise Exception(f"Receive error during ept_map call 0x{map_response.status:08X}")
+        raise ValueError(f"Receive error during ept_map call 0x{map_response.status:08X}")
 
     for tower in map_response.towers:
         for floor in tower:
             if isinstance(floor, TCPFloor):
                 return floor.port
 
-    raise Exception("Did not find expected TCP Port in ept_map response")
+    raise ValueError("Did not find expected TCP Port in ept_map response")
 
 
 def _process_get_key_result(

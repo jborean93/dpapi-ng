@@ -246,11 +246,11 @@ class RpcClient:
 
         pdu_resp = PDU.unpack(response)
         if isinstance(pdu_resp, BindNak):
-            raise Exception(f"Received BindNack with reason 0x{pdu_resp.reject_reason:08X}")
+            raise ValueError(f"Received BindNack with reason 0x{pdu_resp.reject_reason:08X}")
         elif isinstance(pdu_resp, Fault):
-            raise Exception(f"Receive Fault with status 0x{pdu_resp.status:08X}")
+            raise ValueError(f"Receive Fault with status 0x{pdu_resp.status:08X}")
         elif not isinstance(pdu_resp, resp_type):
-            raise Exception(
+            raise ValueError(
                 f"Received unexpected PDU response of {type(pdu_resp).__name__} when expecting {resp_type.__name__}"
             )
 

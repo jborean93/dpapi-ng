@@ -1,0 +1,53 @@
+all:
+  children:
+    windows:
+      hosts:
+        DC01:
+          ansible_host: 192.168.3.10
+          vagrant_box: jborean93/WindowsServer2022
+        APP01:
+          ansible_host: 192.168.3.11
+          vagrant_box: jborean93/WindowsServer2022
+      vars:
+        ansible_connection: psrp
+        ansible_port: 5985
+        python_interpreters:
+        - C:\Program Files\Python37
+        - C:\Program Files (x86)\Python37-32
+        - C:\Program Files\Python38
+        - C:\Program Files (x86)\Python38-32
+        - C:\Program Files\Python39
+        - C:\Program Files (x86)\Python39-32
+        - C:\Program Files\Python310
+        - C:\Program Files (x86)\Python310-32
+        - C:\Program Files\Python311
+        - C:\Program Files (x86)\Python311-32
+
+    linux:
+      hosts:
+        DEBIAN11-MIT:
+          ansible_host: 192.168.3.12
+          vagrant_box: generic/debian11
+          krb_provider: mit
+          krb_packages:
+          - krb5-user
+          - libkrb5-dev
+        DEBIAN11-HEIMDAL:
+          ansible_host: 192.168.3.13
+          vagrant_box: generic/debian11
+          krb_provider: heimdal
+          krb_packages:
+          - heimdal-clients
+          - heimdal-dev
+
+      vars:
+        ansible_ssh_common_args: -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no
+
+  vars:
+    ansible_user: vagrant
+    ansible_password: vagrant
+
+    domain_name: dpaping.test
+    domain_username: vagrant-domain
+    domain_password: VagrantPass1
+    domain_user_upn: '{{ domain_username }}@{{ domain_name | upper }}'

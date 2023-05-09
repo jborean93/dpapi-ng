@@ -9,6 +9,7 @@ import uuid
 import pytest
 from cryptography.hazmat.primitives import hashes
 
+from dpapi_ng import _blob as blob
 from dpapi_ng import _gkdi as gkdi
 
 from .conftest import get_test_data
@@ -206,7 +207,7 @@ def test_ffc_dh_parameters_invalid_magic() -> None:
         gkdi.FFCDHParameters.unpack(data)
 
 
-def text_ffc_dh_key_pack() -> None:
+def test_ffc_dh_key_pack() -> None:
     expected = get_test_data("ffc_dh_key")
 
     msg = gkdi.FFCDHKey(
@@ -243,6 +244,42 @@ def test_ffc_dh_key_invalid_magic() -> None:
 
     with pytest.raises(ValueError, match="Failed to unpack FFCDHKey as magic identifier is invalid"):
         gkdi.FFCDHKey.unpack(data)
+
+
+def test_ecdh_key_pack() -> None:
+    expected = get_test_data("ecdh_key")
+
+    msg = gkdi.ECDHKey(
+        curve_name="P256",
+        key_length=32,
+        x=25243830316603712129559807215192800963817053918117758232684283953073092162706,
+        y=5597696687659389228845157203945777531845995814681629604081047981407116394432,
+    )
+    actual = msg.pack()
+    assert actual == expected
+
+
+def test_ecdh_key_pack_invalid_curve() -> None:
+    with pytest.raises(ValueError, match="Unknown curve 'test', cannot pack"):
+        gkdi.ECDHKey(curve_name="test", key_length=0, x=0, y=0).pack()
+
+
+def test_ecdh_key_unpack() -> None:
+    data = get_test_data("ecdh_key")
+
+    msg = gkdi.ECDHKey.unpack(data)
+    assert msg.key_length == 32
+    assert msg.curve_name == "P256"
+    assert msg.curve_and_hash
+    assert msg.x == 25243830316603712129559807215192800963817053918117758232684283953073092162706
+    assert msg.y == 5597696687659389228845157203945777531845995814681629604081047981407116394432
+
+
+def test_ecdh_key_unpack_invalid_curve() -> None:
+    data = b"\x00\x00\x00\x00"
+
+    with pytest.raises(ValueError, match="Failed to unpack ECDHKey with unknown curve 0x00000000"):
+        gkdi.ECDHKey.unpack(data)
 
 
 def test_group_key_envelope_pack() -> None:
@@ -348,3 +385,207 @@ def test_group_key_envelope_invalid_magic() -> None:
 
     with pytest.raises(ValueError, match="Failed to unpack GroupKeyEnvelope as magic identifier is invalid"):
         gkdi.GroupKeyEnvelope.unpack(data)
+
+
+def test_group_key_envelope_get_kek_is_public() -> None:
+    envelope = gkdi.GroupKeyEnvelope(
+        version=1,
+        flags=1,
+        l0=0,
+        l1=0,
+        l2=0,
+        root_key_identifier=uuid.UUID(int=0),
+        kdf_algorithm="",
+        kdf_parameters=b"",
+        secret_algorithm="",
+        secret_parameters=b"",
+        private_key_length=0,
+        public_key_length=0,
+        domain_name="",
+        forest_name="",
+        l1_key=b"",
+        l2_key=b"",
+    )
+
+    with pytest.raises(ValueError, match="Current user is not authorized to retrieve the KEK information"):
+        envelope.get_kek(blob.KeyIdentifier(1, 1, 0, 0, 0, uuid.UUID(int=0), b"", "", ""))
+
+
+def test_group_key_envelope_get_kek_l0_mismatch() -> None:
+    envelope = gkdi.GroupKeyEnvelope(
+        version=1,
+        flags=0,
+        l0=1,
+        l1=0,
+        l2=0,
+        root_key_identifier=uuid.UUID(int=0),
+        kdf_algorithm="test",
+        kdf_parameters=b"",
+        secret_algorithm="",
+        secret_parameters=b"",
+        private_key_length=0,
+        public_key_length=0,
+        domain_name="",
+        forest_name="",
+        l1_key=b"",
+        l2_key=b"",
+    )
+
+    with pytest.raises(ValueError, match="L0 index 1 does not match the requested L0 index 0"):
+        envelope.get_kek(blob.KeyIdentifier(1, 1, 0, 0, 0, uuid.UUID(int=0), b"", "", ""))
+
+
+def test_group_key_envelope_get_kek_invalid_kdf() -> None:
+    envelope = gkdi.GroupKeyEnvelope(
+        version=1,
+        flags=0,
+        l0=0,
+        l1=0,
+        l2=0,
+        root_key_identifier=uuid.UUID(int=0),
+        kdf_algorithm="test",
+        kdf_parameters=b"",
+        secret_algorithm="",
+        secret_parameters=b"",
+        private_key_length=0,
+        public_key_length=0,
+        domain_name="",
+        forest_name="",
+        l1_key=b"",
+        l2_key=b"",
+    )
+
+    with pytest.raises(NotImplementedError, match="Unknown KDF algorithm 'test'"):
+        envelope.get_kek(blob.KeyIdentifier(1, 1, 0, 0, 0, uuid.UUID(int=0), b"", "", ""))
+
+
+# See tests/integration/files/generate_seed_keys.py on how to generate the
+# known values from the L1 seed key.
+@pytest.mark.parametrize(
+    "l1, l2, l1_key, l2_key",
+    [
+        (
+            0,
+            0,
+            b"",
+            (
+                b"\x1B\x0F\x11\x3F\x01\x93\x10\xE5"
+                b"\xA8\x4E\xA3\x0B\x3A\xCB\xC6\x58"
+                b"\x21\x79\xC9\xB0\x49\x2B\xA8\x4A"
+                b"\xF6\xA2\x5D\xE3\xCA\x42\x82\xC9"
+                b"\x1B\x50\x3B\x7E\x01\x15\x1E\x29"
+                b"\x27\x72\x93\x07\xDA\x8E\x60\xC6"
+                b"\x4E\x3D\x3A\xFB\x66\x80\x06\xE2"
+                b"\x2F\x2B\xFF\x7F\x7C\x14\xAA\x18"
+            ),
+        ),
+        (
+            0,
+            31,
+            (
+                b"\xC7\xA2\x2B\x5B\x09\x70\x53\x80"
+                b"\xB4\x5C\xDD\x29\x33\xE0\xFA\xA6"
+                b"\x8E\xA2\xC9\x8A\x3E\x50\x47\x27"
+                b"\x5D\xD3\xB2\xE2\xDC\xCF\x55\x86"
+                b"\xD7\x2A\x58\xA0\x76\x2D\x2E\x5A"
+                b"\x53\x42\x99\xF5\x40\x5E\x31\xEE"
+                b"\x51\x4B\xD4\xE1\x3A\xA2\xF5\x4A"
+                b"\xF0\xC3\x0C\xDB\xC9\xCC\x03\x01"
+            ),
+            b"",
+        ),
+        (
+            31,
+            31,
+            (
+                b"\x60\xE0\xA8\x1F\x93\x16\x4F\x5D"
+                b"\xC3\xAB\xE9\x81\xE1\xEE\x54\xC1"
+                b"\xA6\xB9\xB0\xED\xB6\xFF\x82\x74"
+                b"\x64\x27\x58\xD2\x9B\xBC\x66\x55"
+                b"\x9D\x11\xF1\x87\x1A\x82\xA6\xE3"
+                b"\xF2\x32\xC4\x24\x90\xD7\xC4\x1C"
+                b"\x6A\xD2\xB8\xB1\x89\xFE\x27\x52"
+                b"\xA8\x8C\xEC\x2E\xA4\xB2\x02\x1C"
+            ),
+            b"",
+        ),
+        (
+            2,
+            6,
+            (
+                b"\x58\xC8\xE7\xF9\xC2\xB7\x26\x0B"
+                b"\xE8\x8F\xB1\x88\xEB\x62\x1A\x60"
+                b"\x91\x97\x74\xB9\x30\x6F\xCF\xE4"
+                b"\x5B\x6C\x17\xD0\x49\x4A\x43\xD5"
+                b"\x55\xA2\x74\xE6\xDD\x79\x5C\xF0"
+                b"\xA6\x81\x92\x63\xDD\x3E\xC9\x12"
+                b"\x5E\xB9\xC5\xB6\x2F\xBE\x04\x1A"
+                b"\x51\x33\xC1\xA2\xCB\x0A\x58\x92"
+            ),
+            b"",
+        ),
+    ],
+    ids=[
+        "ExactValue",
+        "FromL1Seed",
+        "FromRootSeed",
+        "L1AndL2Different",
+    ],
+)
+def test_compute_l2_key(
+    l1: int,
+    l2: int,
+    l1_key: bytes,
+    l2_key: bytes,
+) -> None:
+    expected = (
+        b"\x1B\x0F\x11\x3F\x01\x93\x10\xE5"
+        b"\xA8\x4E\xA3\x0B\x3A\xCB\xC6\x58"
+        b"\x21\x79\xC9\xB0\x49\x2B\xA8\x4A"
+        b"\xF6\xA2\x5D\xE3\xCA\x42\x82\xC9"
+        b"\x1B\x50\x3B\x7E\x01\x15\x1E\x29"
+        b"\x27\x72\x93\x07\xDA\x8E\x60\xC6"
+        b"\x4E\x3D\x3A\xFB\x66\x80\x06\xE2"
+        b"\x2F\x2B\xFF\x7F\x7C\x14\xAA\x18"
+    )
+    l0 = 361
+    key_id = uuid.UUID("2e1b932a-4e21-ced3-0b7b-8815aff8335d")
+
+    actual = gkdi.compute_l2_key(
+        hashes.SHA512(),
+        blob.KeyIdentifier(
+            version=1,
+            flags=0,
+            l0=l0,
+            l1=0,
+            l2=0,
+            root_key_identifier=key_id,
+            key_info=b"",
+            domain_name="",
+            forest_name="",
+        ),
+        gkdi.GroupKeyEnvelope(
+            version=1,
+            flags=0,
+            l0=l0,
+            l1=l1,
+            l2=l2,
+            root_key_identifier=key_id,
+            kdf_algorithm="",
+            kdf_parameters=b"",
+            secret_algorithm="",
+            secret_parameters=b"",
+            private_key_length=0,
+            public_key_length=0,
+            domain_name="",
+            forest_name="",
+            l1_key=l1_key,
+            l2_key=l2_key,
+        ),
+    )
+    assert actual == expected
+
+
+def test_compute_kek_invalid_algorithm() -> None:
+    with pytest.raises(NotImplementedError, match="Unknown secret agreement algorithm 'test'"):
+        gkdi.compute_kek_from_public_key(hashes.SHA256(), b"", "test", None, b"", 0)

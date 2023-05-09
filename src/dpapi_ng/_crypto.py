@@ -73,6 +73,7 @@ def kdf(
 
 
 def kdf_concat(
+    algorithm: hashes.HashAlgorithm,
     shared_secret: bytes,
     algorithm_id: bytes,
     party_uinfo: bytes,
@@ -81,9 +82,7 @@ def kdf_concat(
 ) -> bytes:
     otherinfo = b"".join([algorithm_id, party_uinfo, party_vinfo])
     return ConcatKDFHash(
-        # BCryptDeriveKey always uses t the SHA256 algorithm here for
-        # SP800_56A_CONCAT.
-        hashes.SHA256(),
+        algorithm,
         length=length,
         otherinfo=otherinfo,
     ).derive(shared_secret)

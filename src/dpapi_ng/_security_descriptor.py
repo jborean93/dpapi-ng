@@ -31,32 +31,28 @@ def sid_to_bytes(sid: str) -> bytes:
 def ace_to_bytes(sid: str, access_mask: int) -> bytes:
     b_sid = sid_to_bytes(sid)
 
-    data = bytearray(8 + len(b_sid))
-    view = memoryview(data)
-
-    data[0] = 0  # AceType - ACCESS_ALLOWED_ACE_TYPE
-    data[1] = 0  # AceFlags - None
-    view[2:4] = len(data).to_bytes(2, byteorder="little")
-    view[4:8] = access_mask.to_bytes(4, byteorder="little")
-    view[8:] = b_sid
-
-    return bytes(data)
+    return b"".join(
+        [
+            b"\x00\x00",  # AceType, AceFlags - ACCESS_ALLOWED_ACE_TYPE
+            (8 + len(b_sid)).to_bytes(2, byteorder="little"),
+            access_mask.to_bytes(4, byteorder="little"),
+            b_sid,
+        ]
+    )
 
 
 def acl_to_bytes(aces: t.List[bytes]) -> bytes:
     ace_data = b"".join(aces)
 
-    data = bytearray(8 + len(ace_data))
-    view = memoryview(data)
-
-    data[0] = 2  # AclRevision - ACL_REVISION
-    data[1] = 0  # Sbz1
-    view[2:4] = (8 + len(ace_data)).to_bytes(2, byteorder="little")
-    view[4:6] = len(aces).to_bytes(2, byteorder="little")
-    view[6:8] = b"\x00\x00"  # Sbz2
-    view[8:] = ace_data
-
-    return bytes(data)
+    return b"".join(
+        [
+            b"\x02\x00",  # AclRevision, Sbz1 - ACL_REVISION
+            (8 + len(ace_data)).to_bytes(2, byteorder="little"),
+            len(aces).to_bytes(2, byteorder="little"),
+            b"\x00\x00",  # Sbz1
+            ace_data,
+        ]
+    )
 
 
 def sd_to_bytes(

@@ -1,0 +1,5 @@
+[libdefaults]
+  default_realm = {{ domain_name | upper }}
+{% if krb_provider == 'mit' %}
+  dns_canonicalize_hostname = false
+{% endif %}

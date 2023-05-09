@@ -1,0 +1,368 @@
+- name: setup common Windows information
+  hosts: windows
+  gather_facts: false
+
+  tasks:
+  - name: get network connection names
+    ansible.windows.win_powershell:
+      script: |
+        $ErrorActionPreference = 'Stop'
+        $Ansible.Changed = $false
+
+        Get-CimInstance -ClassName Win32_NetworkAdapter -Filter "Netenabled='True'" | ForEach-Object -Process {
+          $config = Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration -Filter "Index='$($_.Index)'"
+          if ($config.IPAddress -contains '{{ ansible_host }}') {
+            $_.NetConnectionID
+          }
+        }
+    register: raw_connection_name
+
+  - set_fact:
+      public_connection_name: '{{ raw_connection_name.output[0] }}'
+
+  - name: install ctypes PowerShell module
+    ansible.windows.win_powershell:
+      script: |
+        $ErrorActionPreference = 'Stop'
+
+        $ctypesPath = 'C:\Program Files\WindowsPowerShell\Modules\Ctypes'
+        if (Test-Path -LiteralPath $ctypesPath) {
+            $Ansible.Changed = $false
+        }
+        else {
+            Install-Module -Name Ctypes -Scope AllUsers -Force
+        }
+
+  - name: copy across scripts for testing
+    ansible.windows.win_copy:
+      src: '{{ item }}'
+      dest: C:\temp\{{ item }}
+    loop:
+    - ConvertTo-DpapiNgBlob.ps1
+    - New-KdsRootKey.ps1
+
+- name: create domain controller
+  hosts: DC01
+  gather_facts: false
+
+  tasks:
+  - name: set the DNS for the internal adapters to localhost
+    ansible.windows.win_dns_client:
+      adapter_names:
+      - '{{ public_connection_name }}'
+      dns_servers:
+      - 127.0.0.1
+
+  - name: ensure domain exists and DC is promoted as a domain controller
+    microsoft.ad.domain:
+      dns_domain_name: '{{ domain_name }}'
+      safe_mode_password: '{{ domain_password }}'
+      reboot: true
+
+  - name: create domain username
+    microsoft.ad.user:
+      name: '{{ domain_username }}'
+      upn: '{{ domain_user_upn }}'
+      description: '{{ domain_username }} Domain Account'
+      password: '{{ domain_password }}'
+      password_never_expires: true
+      update_password: when_changed
+      groups:
+        set:
+        - Domain Admins
+        - Domain Users
+        - Enterprise Admins
+      state: present
+
+- name: join Windows host to domain
+  hosts: APP01
+  gather_facts: false
+
+  tasks:
+  - name: set the DNS for the private adapter to point to the DC
+    ansible.windows.win_dns_client:
+      adapter_names:
+      - '{{ public_connection_name }}'
+      dns_servers:
+      - '{{ hostvars["DC01"]["ansible_host"] }}'
+
+  - name: join host to domain
+    microsoft.ad.membership:
+      dns_domain_name: '{{ domain_name }}'
+      domain_admin_user: '{{ domain_user_upn }}'
+      domain_admin_password: '{{ domain_password }}'
+      state: domain
+      reboot: true
+
+  - name: test out domain user logon
+    ansible.windows.win_whoami:
+    register: become_res
+    failed_when: become_res.upn != domain_user_upn
+    become: true
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+# Use the following to get a snaphot of programs installed and their product_ids
+# 'SOFTWARE', 'SOFTWARE\Wow6432Node' | ForEach-Object {
+#       $getParams = @{
+#           Path = "HKLM:\$_\Microsoft\Windows\CurrentVersion\Uninstall\*"
+#           Name = 'DisplayName'
+#           ErrorAction = 'SilentlyContinue'
+#       }
+#       Get-ItemProperty @getParams | Select-Object -Property @(
+#           @{ N = 'Name'; E = { $_.DisplayName } },
+#           @{ N = 'AppId'; E = { $_.PSChildName } }
+#       )
+#   } | Where-Object { $_.Name -like 'Python * Standard Library *' }
+
+  - name: install Python interpreters
+    ansible.windows.win_package:
+      path: '{{ item.url }}'
+      arguments: '{{ item.arguments }}'
+      product_id: '{{ item.product_id }}'
+      state: present
+    with_items:
+    - url: https://www.python.org/ftp/python/3.7.9/python-3.7.9.exe
+      product_id: '{65048DA1-5996-4FF9-B20A-66EB2E68D0A4}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.7.9/python-3.7.9-amd64.exe
+      product_id: '{FF740026-2FC0-4F8A-A046-8B316AF4ECA6}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.8.10/python-3.8.10.exe
+      product_id: '{4196628C-AE5C-4304-B166-B7C1E93CDC25}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe
+      product_id: '{080E0048-853C-49FB-96ED-30DEF7AB6E34}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe
+      product_id: '{E23C472D-F346-4D47-A909-9D48E5D7252F}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.9.13/python-3.9.13-amd64.exe
+      product_id: '{90A30DAB-6FD8-4CF8-BB8B-C0DB21C69F20}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.10.10/python-3.10.10.exe
+      product_id: '{0438638B-4373-489E-BCE6-9C2D18119112}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.10.10/python-3.10.10-amd64.exe
+      product_id: '{DCFC24EF-C987-4F08-A807-C562D5546446}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.11.2/python-3.11.2.exe
+      product_id: '{BF492FDC-5681-4EE9-A631-1F11748D4E05}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.11.2/python-3.11.2-amd64.exe
+      product_id: '{6C19B2EE-FA34-4270-A87F-1FF008C1AC6E}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+
+  - name: ensure virtualenv package is installed for each Python install
+    ansible.windows.win_command:
+      argv:
+      - '{{ item }}\python.exe'
+      - -m
+      - pip
+      - install
+      - virtualenv
+    args:
+      creates: '{{ item }}\Scripts\virtualenv.exe'
+    with_items: '{{ python_interpreters }}'
+
+  - name: create virtualenv for each Python install
+    ansible.windows.win_command:
+      argv:
+      - '{{ item }}\python.exe'
+      - -m
+      - virtualenv
+      - C:\temp\venv\{{ item | win_basename }}
+    args:
+      creates: c:\temp\venv\{{ item | win_basename }}
+    with_items: '{{ python_interpreters }}'
+
+  # - name: copy across wheel artifacts
+  #   ansible.windows.win_copy:
+  #     src: artifact.zip
+  #     dest: C:\temp\wheels.zip
+
+  # - name: ensure wheel dir exists
+  #   ansible.windows.win_file:
+  #     path: C:\temp\wheels
+  #     state: directory
+
+  # - name: extract wheel from archive
+  #   community.windows.win_unzip:
+  #     src: C:\temp\wheels.zip
+  #     dest: C:\temp\wheels
+
+  # - name: get dpapi_ng artifact sdist filename
+  #   ansible.windows.win_find:
+  #     paths: C:\temp\wheels
+  #     patterns: 'sansldap-*.tar.gz'
+  #     use_regex: false
+  #   register: sansldap_sdist_file
+
+  # - name: verify sdist was found
+  #   assert:
+  #     that:
+  #     - sansldap_sdist_file.files | count == 1
+
+  # - name: get sansldap artifact version
+  #   set_fact:
+  #     sansldap_version: >-
+  #       {{ sansldap_sdist_file.files[0].filename | regex_replace('sansldap-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+
+  # - name: install sansldap into virtualenv
+  #   ansible.windows.win_command:
+  #     argv:
+  #     - c:\temp\venv\{{ item | win_basename }}\Scripts\python.exe
+  #     - -m
+  #     - pip
+  #     - install
+  #     - sansldap=={{ sansldap_version }}
+  #     - pyspnego[kerberos]
+  #     - pytest
+  #     - pytest-asyncio
+  #     - --find-links=C:/temp/wheels
+  #   args:
+  #     creates: c:\temp\venv\{{ item | win_basename }}\Lib\site-packages\sansldap
+  #   with_items: '{{ python_interpreters }}'
+
+- name: set up Linux host
+  hosts: linux
+  gather_facts: false
+  become: true
+
+  tasks:
+  - name: install base packages
+    ansible.builtin.apt:
+      name:
+      - gcc
+      - make
+      - python3
+      - python3-dev
+      - python3-venv
+      - unzip
+      - vim
+      state: present
+
+  - name: install kerberos packages
+    ansible.builtin.apt:
+      name: '{{ krb_packages }}'
+      state: present
+
+  - name: template krb5.conf file
+    ansible.builtin.template:
+      src: krb5.conf.j2
+      dest: /etc/krb5.conf
+
+  - name: setup DNS settings for eth0 adapter
+    ansible.builtin.copy:
+      content: |
+        [Match]
+        Name=eth0
+
+        [Network]
+        DHCP=ipv4
+      dest: /etc/systemd/network/eth0.network
+    register: eth0_networkd
+
+  - name: setup DNS settings for eth1 adapter
+    ansible.builtin.copy:
+      content: |
+        [Match]
+        Name=eth1
+
+        [Network]
+        Address={{ ansible_host }}/24
+        Gateway=192.168.3.1
+        DNS={{ hostvars["DC01"]["ansible_host"] }}
+        Domains=~{{ domain_name }}
+      dest: /etc/systemd/network/eth1.network
+    register: eth1_networkd
+
+  - name: ensure resolv.conf is pointing to systemd
+    ansible.builtin.file:
+      src: /run/systemd/resolve/stub-resolv.conf
+      dest: /etc/resolv.conf
+      state: link
+      force: true
+    register: resolv_conf_repoint
+
+  - name: start and enable the systemd DNS services
+    ansible.builtin.service:
+      name: '{{ item }}'
+      enabled: True
+      state: restarted
+    when: >-
+      eth0_networkd is changed or
+      eth1_networkd is changed or
+      resolv_conf_repoint is changed
+    loop:
+    - systemd-resolved
+    - systemd-networkd
+
+  - name: create user keytab - MIT
+    ansible.builtin.command: ktutil
+    args:
+      chdir: ~/
+      creates: ~/user.keytab
+      stdin: "addent -password -p {{ domain_user_upn }} -k 1 -e aes256-cts\n{{ domain_password }}\nwrite_kt user.keytab"
+    become: false
+    when: krb_provider == 'mit'
+
+  - name: create user keytab - Heimdal
+    ansible.builtin.command: >-
+      ktutil
+      --keytab=user.keytab
+      add
+      --principal={{ domain_user_upn }}
+      --kvno=1
+      --enctype=aes256-cts
+      --password={{ domain_password }}
+    args:
+      chdir: ~/
+      creates: ~/user.keytab
+    become: false
+    when: krb_provider == 'heimdal'
+
+  # - name: ensure wheel dir exists
+  #   ansible.builtin.file:
+  #     path: ~/wheels
+  #     state: directory
+  #   become: false
+
+  # - name: extract wheel artifacts
+  #   ansible.builtin.unarchive:
+  #     src: artifact.zip
+  #     dest: ~/wheels
+  #   become: false
+
+  # - name: get sansldap artifact sdist filename
+  #   ansible.builtin.find:
+  #     paths: ~/wheels
+  #     patterns: 'sansldap-*.tar.gz'
+  #     recurse: false
+  #     file_type: file
+  #   become: false
+  #   register: sansldap_sdist_file
+
+  # - name: verify sdist was found
+  #   assert:
+  #     that:
+  #     - sansldap_sdist_file.files | count == 1
+
+  # - name: get sansldap artifact version
+  #   set_fact:
+  #     sansldap_version: >-
+  #       {{ sansldap_sdist_file.files[0].path | basename | regex_replace('sansldap-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+
+  # - name: create a virtualenv for each Python interpeter
+  #   ansible.builtin.pip:
+  #     name:
+  #     - sansldap=={{ sansldap_version }}
+  #     - pyspnego[kerberos]
+  #     - pytest
+  #     - pytest-asyncio
+  #     virtualenv: ~/venv/sansldap
+  #     virtualenv_command: /usr/bin/python3 -m venv
+  #     extra_args: --find-links file:///{{ sansldap_sdist_file.files[0].path | dirname }}
+  #   become: false
