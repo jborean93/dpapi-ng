@@ -1,0 +1,8 @@
+[allowlist]
+  description = "Global Allowlist"
+
+  # Ignore based on any subset of the file path
+  paths = [
+    # Ignore test data
+    '''tests\/integration\/files\/sp800_56a_concat\.ps1''',
+  ]
