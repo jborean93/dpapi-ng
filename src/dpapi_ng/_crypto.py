@@ -27,6 +27,19 @@ def cek_decrypt(
         raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
 
 
+def cek_encrypt(
+    algorithm: str,
+    parameters: t.Optional[bytes],
+    kek: bytes,
+    value: bytes,
+) -> bytes:
+    if algorithm == "2.16.840.1.101.3.4.1.45":  # AES256-wrap
+        return keywrap.aes_key_wrap(kek, value)
+
+    else:
+        raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
+
+
 def content_decrypt(
     algorithm: str,
     parameters: t.Optional[bytes],
@@ -42,6 +55,26 @@ def content_decrypt(
 
         cipher = AESGCM(cek)
         return cipher.decrypt(iv, value, None)
+
+    else:
+        raise NotImplementedError(f"Unknown content encryption algorithm OID '{algorithm}'")
+
+
+def content_encrypt(
+    algorithm: str,
+    parameters: t.Optional[bytes],
+    cek: bytes,
+    value: bytes,
+) -> bytes:
+    if algorithm == "2.16.840.1.101.3.4.1.46":  # AES256-GCM
+        if not parameters:
+            raise ValueError("Expecting parameters for AES256 GCM decryption but received none.")
+
+        reader = ASN1Reader(parameters).read_sequence()
+        iv = reader.read_octet_string()
+
+        cipher = AESGCM(cek)
+        return cipher.encrypt(iv, value, None)
 
     else:
         raise NotImplementedError(f"Unknown content encryption algorithm OID '{algorithm}'")

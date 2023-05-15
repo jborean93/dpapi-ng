@@ -150,6 +150,8 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
+    # todo: def pack() -> bytes
+
     @classmethod
     def unpack(
         cls,

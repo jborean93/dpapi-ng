@@ -6,8 +6,10 @@ from __future__ import annotations
 import typing as t
 import uuid
 
-from ._blob import DPAPINGBlob
-from ._crypto import cek_decrypt, content_decrypt
+from ._blob import DPAPINGBlob, KeyIdentifier
+from ._crypto import cek_decrypt, cek_encrypt, content_decrypt, content_encrypt
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from ._security_descriptor import ace_to_bytes, sd_to_bytes
 from ._dns import async_lookup_dc, lookup_dc
 from ._epm import EPM, EptMap, EptMapResult, TCPFloor, build_tcpip_tower
 from ._gkdi import (
@@ -224,6 +226,57 @@ def _decrypt_blob(
         cek,
         blob.enc_content,
     )
+
+
+def _encrypt_blob(
+    blob: bytes,
+    key: GroupKeyEnvelope,
+    security_descriptor: bytes,
+) -> bytes:
+    # Generate cek and encrypt our payload.
+    cek = AESGCM.generate_key(bit_length=256)
+    enc_content_algorithm = "2.16.840.1.101.3.4.1.46"
+    enc_content_parameters = b'0\x11\x04\x0c\xf7s\xd0\xde\x8d\xd2\xb1\x95\xd2\nB\xc1\x02\x01\x10'
+    enc_content = content_encrypt(
+        enc_content_algorithm,
+        enc_content_parameters,
+        cek,
+        blob,
+    )
+
+    # Wrap the cek with the kek.
+    key_identifier = KeyIdentifier(
+        version=1,
+        flags=key.flags,
+        l0=key.l0,
+        l1=key.l1,
+        l2=key.l2,
+        root_key_identifier=key.root_key_identifier,
+        key_info=b'', # todo: how to get key_info from GroupKeyEnvelope?
+        domain_name=key.domain_name,
+        forest_name=key.forest_name,
+    )
+    kek = key.get_kek(key_identifier)
+
+    enc_cek_algorithm = "2.16.840.1.101.3.4.1.45"
+    enc_cek_parameters = None
+    enc_cek = cek_encrypt(
+        enc_cek_algorithm,
+        enc_cek_parameters,
+        kek,
+        cek,
+    )
+
+    return DPAPINGBlob(
+            key_identifier=key_identifier,
+            security_descriptor=security_descriptor,
+            enc_cek=enc_cek,
+            enc_cek_algorithm=enc_cek_algorithm,
+            enc_cek_parameters=enc_cek_parameters,
+            enc_content=enc_content,
+            enc_content_algorithm=enc_content_algorithm,
+            enc_content_parameters=enc_content_parameters,
+        ) # todo: .pack()
 
 
 class RootKey(t.NamedTuple):
@@ -507,6 +560,91 @@ def ncrypt_unprotect_secret(
     cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
+
+
+def ncrypt_protect_secret(
+    data: bytes,
+    sid: string,
+    server: t.Optional[str] = None,
+    username: t.Optional[str] = None,
+    password: t.Optional[str] = None,
+    auth_protocol: str = "negotiate",
+    cache: t.Optional[KeyCache] = None,
+) -> bytes:
+    """Encrypt DPAPI-NG Blob.
+
+    Encrypts the blob provided as DPAPI-NG Blob. This is meant to
+    replicate the Win32 API `NCryptProtectSecret`_.
+
+    Encrypting the DPAPI-NG blob requires making an RPC call to the domain
+    controller for the domain the blob was created in. It will attempt this
+    by looking up the DC through an SRV lookup but ``server`` can be specified
+    to avoid this SRV lookup.
+
+    The RPC call requires the caller to authenticate before the key information
+    is provided. This user must be one who is authorized to encrypt the secret.
+    Explicit credentials can be specified, if none are the current Kerberos
+    ticket retrieved by ``kinit`` will be used instead. Make sure to install
+    the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure Kerberos auth
+    can be used.
+
+    Args:
+        data: The bytes blob to encrypt.
+        server: The domain controller to lookup the root key info.
+        username: The username to encrypt the DPAPI-NG blob as.
+        password: The password for the user.
+        auth_protocol: The authentication protocol to use, defaults to
+            ``negotiate`` but can be ``kerberos`` or ``ntlm``.
+        cache: Optional cache that is used as the key source to avoid making
+            the RPC call.
+
+    Returns:
+        bytes: The encrypted DPAPI-NG data.
+
+    Raises:
+        ValueError: An invalid data structure was found.
+        NotImplementedError: An unknown value was found and has not been
+            implemented yet.
+
+    _NCryptProtectSecret:
+        https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
+    """
+    sd = sd_to_bytes(
+        owner="S-1-5-18",
+        group="S-1-5-18",
+        dacl=[ace_to_bytes(sid, 3), ace_to_bytes("S-1-1-0", 2)],
+    )
+
+    #cache = cache or KeyCache()
+    #rk = cache._get_key(
+    #    sd,
+    #    blob.key_identifier.root_key_identifier,
+    #    blob.key_identifier.l0,
+    #    blob.key_identifier.l1,
+    #    blob.key_identifier.l2,
+    #)
+    rk = None
+    if not rk:
+        if not server:
+            srv = lookup_dc(blob.key_identifier.domain_name)
+            server = srv.target
+
+        rk = _sync_get_key(
+            server,
+            sd,
+            None,
+            -1,
+            -1,
+            -1,
+            username=username,
+            password=password,
+            auth_protocol=auth_protocol,
+        )
+        print('rk2', rk)
+
+    #cache._store_key(sd, rk)
+
+    return _encrypt_blob(data, rk, sd)
 
 
 async def async_ncrypt_unprotect_secret(
