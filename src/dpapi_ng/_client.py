@@ -112,10 +112,10 @@ def _process_ept_map_result(
 def _process_get_key_result(
     response: Response,
 ) -> GroupKeyEnvelope:
-    pad_length = 0
-    if response.sec_trailer:
-        pad_length = response.sec_trailer.pad_length
-    raw_resp = response.stub_data[:-pad_length]
+    pad_length = len(response.stub_data)
+    if response.sec_trailer and response.sec_trailer.pad_length:
+        pad_length -= response.sec_trailer.pad_length
+    raw_resp = response.stub_data[:pad_length]
     return GetKey.unpack_response(raw_resp)
 
 
