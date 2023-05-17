@@ -7,7 +7,7 @@ import dataclasses
 import typing as t
 import uuid
 
-from ._asn1 import ASN1Reader
+from ._asn1 import ASN1Reader, ASN1Writer, ASN1Tag, TypeTagNumber, TagClass
 from ._pkcs7 import (
     ContentInfo,
     EnvelopedData,
@@ -150,7 +150,42 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
-    # todo: def pack() -> bytes
+    def pack(self, sid:str) -> bytes:
+        # TODO: it's not very nice to pass sid as separate parameter here, should be extracted from self.security_descriptor
+        writer = ASN1Writer()
+        with writer.push_sequence() as ContentInfo:
+            ContentInfo.write_object_identifier('1.2.840.113549.1.7.3') #envelopedData
+            with ContentInfo.push_sequence(ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC,tag_number=0,is_constructed=True)) as Content:
+                with Content.push_sequence() as EnvelopedData:
+                    EnvelopedData.write_integer(2)
+                    with EnvelopedData.push_set() as RecipientInfos:
+                        with RecipientInfos.push_sequence(ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC,tag_number=2,is_constructed=True)) as RecipientInfo:
+                            RecipientInfo.write_integer(4)
+                            with RecipientInfo.push_sequence() as KeyAgreeRecipientInfo:
+                                KeyAgreeRecipientInfo.write_octet_string(self.key_identifier.pack())
+                                with KeyAgreeRecipientInfo.push_sequence() as originator:
+                                    originator.write_object_identifier('1.3.6.1.4.1.311.74.1')
+                                    with originator.push_sequence() as originatorSequence:
+                                        originatorSequence.write_object_identifier('1.3.6.1.4.1.311.74.1.1')
+                                        with originatorSequence.push_sequence() as originatorSequence2:
+                                            with originatorSequence2.push_sequence() as originatorSequence3:
+                                                with originatorSequence3.push_sequence() as originatorSequence4:
+                                                    originatorSequence4.write_octet_string('SID'.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
+                                                    originatorSequence4.write_octet_string(sid.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
+                            with RecipientInfo.push_sequence() as KEKRecipientInfo:
+                                KEKRecipientInfo.write_object_identifier('2.16.840.1.101.3.4.1.45') #aes256-wrap
+                            RecipientInfo.write_octet_string(self.enc_cek)
+                    with EnvelopedData.push_sequence() as EncryptedContentInfo:
+                        EncryptedContentInfo.write_object_identifier('1.2.840.113549.1.7.1')
+                        with EncryptedContentInfo.push_sequence() as ContentEncryptionAlgorithmIdentifier:
+                            ContentEncryptionAlgorithmIdentifier.write_object_identifier('2.16.840.1.101.3.4.1.46') #aes256-GCM
+                            ContentEncryptionAlgorithmIdentifier._data.extend(self.enc_content_parameters)
+        return b"".join(
+            [
+                writer.get_data(),
+                self.enc_content,
+            ]
+        )
 
     @classmethod
     def unpack(

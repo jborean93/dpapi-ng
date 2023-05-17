@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import typing as t
 import uuid
+import os
 
+from ._asn1 import ASN1Writer
 from ._blob import DPAPINGBlob, KeyIdentifier
 from ._crypto import cek_decrypt, cek_encrypt, content_decrypt, content_encrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -232,11 +234,19 @@ def _encrypt_blob(
     blob: bytes,
     key: GroupKeyEnvelope,
     security_descriptor: bytes,
+    sid: str,
 ) -> bytes:
     # Generate cek and encrypt our payload.
     cek = AESGCM.generate_key(bit_length=256)
+    cek_iv = os.urandom(12)
+
+    parameters_writer = ASN1Writer()
+    with parameters_writer.push_sequence() as parameters:
+        parameters.write_octet_string(cek_iv)
+        parameters.write_integer(16)
+
     enc_content_algorithm = "2.16.840.1.101.3.4.1.46"
-    enc_content_parameters = b'0\x11\x04\x0c\xf7s\xd0\xde\x8d\xd2\xb1\x95\xd2\nB\xc1\x02\x01\x10'
+    enc_content_parameters = parameters_writer.get_data()
     enc_content = content_encrypt(
         enc_content_algorithm,
         enc_content_parameters,
@@ -252,7 +262,7 @@ def _encrypt_blob(
         l1=key.l1,
         l2=key.l2,
         root_key_identifier=key.root_key_identifier,
-        key_info=b'', # todo: how to get key_info from GroupKeyEnvelope?
+        key_info=b'',
         domain_name=key.domain_name,
         forest_name=key.forest_name,
     )
@@ -276,7 +286,7 @@ def _encrypt_blob(
             enc_content=enc_content,
             enc_content_algorithm=enc_content_algorithm,
             enc_content_parameters=enc_content_parameters,
-        ) # todo: .pack()
+        ).pack(sid)
 
 
 class RootKey(t.NamedTuple):
@@ -640,11 +650,10 @@ def ncrypt_protect_secret(
             password=password,
             auth_protocol=auth_protocol,
         )
-        print('rk2', rk)
 
     #cache._store_key(sd, rk)
 
-    return _encrypt_blob(data, rk, sd)
+    return _encrypt_blob(data, rk, sd, sid)
 
 
 async def async_ncrypt_unprotect_secret(
