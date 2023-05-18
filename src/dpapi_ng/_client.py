@@ -619,21 +619,25 @@ def ncrypt_protect_secret(
     _NCryptProtectSecret:
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
     """
+    root_key_identifier = None
+    key_identifier_l0 = -1
+    key_identifier_l1 = -1
+    key_identifier_l2 = -1
+
     sd = sd_to_bytes(
         owner="S-1-5-18",
         group="S-1-5-18",
         dacl=[ace_to_bytes(sid, 3), ace_to_bytes("S-1-1-0", 2)],
     )
 
-    #cache = cache or KeyCache()
-    #rk = cache._get_key(
-    #    sd,
-    #    blob.key_identifier.root_key_identifier,
-    #    blob.key_identifier.l0,
-    #    blob.key_identifier.l1,
-    #    blob.key_identifier.l2,
-    #)
-    rk = None
+    cache = cache or KeyCache()
+    rk = cache._get_key(
+        sd,
+        root_key_identifier,
+        key_identifier_l0,
+        key_identifier_l1,
+        key_identifier_l2,
+    )
     if not rk:
         if not server:
             srv = lookup_dc(blob.key_identifier.domain_name)
@@ -642,16 +646,16 @@ def ncrypt_protect_secret(
         rk = _sync_get_key(
             server,
             sd,
-            None,
-            -1,
-            -1,
-            -1,
+            root_key_identifier,
+            key_identifier_l0,
+            key_identifier_l1,
+            key_identifier_l2,
             username=username,
             password=password,
             auth_protocol=auth_protocol,
         )
 
-    #cache._store_key(sd, rk)
+    cache._store_key(sd, rk)
 
     return _encrypt_blob(data, rk, sd, sid)
 
@@ -732,3 +736,91 @@ async def async_ncrypt_unprotect_secret(
     cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
+
+
+async def async_ncrypt_protect_secret(
+    data: bytes,
+    sid: string,
+    server: t.Optional[str] = None,
+    username: t.Optional[str] = None,
+    password: t.Optional[str] = None,
+    auth_protocol: str = "negotiate",
+    cache: t.Optional[KeyCache] = None,
+) -> bytes:
+    """Encrypt DPAPI-NG Blob.
+
+    Encrypts the blob provided as DPAPI-NG Blob. This is meant to
+    replicate the Win32 API `NCryptProtectSecret`_.
+
+    Encrypting the DPAPI-NG blob requires making an RPC call to the domain
+    controller for the domain the blob was created in. It will attempt this
+    by looking up the DC through an SRV lookup but ``server`` can be specified
+    to avoid this SRV lookup.
+
+    The RPC call requires the caller to authenticate before the key information
+    is provided. This user must be one who is authorized to encrypt the secret.
+    Explicit credentials can be specified, if none are the current Kerberos
+    ticket retrieved by ``kinit`` will be used instead. Make sure to install
+    the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure Kerberos auth
+    can be used.
+
+    Args:
+        data: The bytes blob to encrypt.
+        server: The domain controller to lookup the root key info.
+        username: The username to encrypt the DPAPI-NG blob as.
+        password: The password for the user.
+        auth_protocol: The authentication protocol to use, defaults to
+            ``negotiate`` but can be ``kerberos`` or ``ntlm``.
+        cache: Optional cache that is used as the key source to avoid making
+            the RPC call.
+
+    Returns:
+        bytes: The encrypted DPAPI-NG data.
+
+    Raises:
+        ValueError: An invalid data structure was found.
+        NotImplementedError: An unknown value was found and has not been
+            implemented yet.
+
+    _NCryptProtectSecret:
+        https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
+    """
+    root_key_identifier = None
+    key_identifier_l0 = -1
+    key_identifier_l1 = -1
+    key_identifier_l2 = -1
+
+    sd = sd_to_bytes(
+        owner="S-1-5-18",
+        group="S-1-5-18",
+        dacl=[ace_to_bytes(sid, 3), ace_to_bytes("S-1-1-0", 2)],
+    )
+
+    cache = cache or KeyCache()
+    rk = cache._get_key(
+        sd,
+        root_key_identifier,
+        key_identifier_l0,
+        key_identifier_l1,
+        key_identifier_l2,
+    )
+    if not rk:
+        if not server:
+            srv = await async_lookup_dc(blob.key_identifier.domain_name)
+            server = srv.target
+
+        rk = await _async_get_key(
+            server,
+            sd,
+            root_key_identifier,
+            key_identifier_l0,
+            key_identifier_l1,
+            key_identifier_l2,
+            username=username,
+            password=password,
+            auth_protocol=auth_protocol,
+        )
+
+    cache._store_key(sd, rk)
+
+    return _encrypt_blob(data, rk, sd, sid)
