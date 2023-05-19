@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import typing as t
 import enum
+import os
 
 from cryptography.hazmat.primitives import hashes, keywrap
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -43,6 +44,18 @@ def cek_encrypt(
 ) -> bytes:
     if algorithm == AlgorithmOID.AES256_WRAP:
         return keywrap.aes_key_wrap(kek, value)
+
+    else:
+        raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
+
+
+def cek_generate(
+    algorithm: str,
+) -> t.Tuple[bytes, bytes]:
+    if algorithm == AlgorithmOID.AES256_WRAP:
+        cek = AESGCM.generate_key(bit_length=256)
+        cek_iv = os.urandom(12)
+        return cek, cek_iv
 
     else:
         raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")

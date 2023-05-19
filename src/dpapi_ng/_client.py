@@ -5,11 +5,10 @@ from __future__ import annotations
 
 import typing as t
 import uuid
-import os
 
 from ._asn1 import ASN1Writer
 from ._blob import DPAPINGBlob, KeyIdentifier
-from ._crypto import cek_decrypt, cek_encrypt, content_decrypt, content_encrypt, AlgorithmOID
+from ._crypto import AlgorithmOID, cek_decrypt, cek_encrypt, cek_generate, content_decrypt, content_encrypt
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ._security_descriptor import ace_to_bytes, sd_to_bytes
 from ._dns import async_lookup_dc, lookup_dc
@@ -237,8 +236,8 @@ def _encrypt_blob(
     protection_descriptor: str,
 ) -> bytes:
     # Generate cek and encrypt our payload.
-    cek = AESGCM.generate_key(bit_length=256)
-    cek_iv = os.urandom(12)
+    enc_cek_algorithm = AlgorithmOID.AES256_WRAP
+    cek, cek_iv = cek_generate(enc_cek_algorithm)
 
     parameters_writer = ASN1Writer()
     with parameters_writer.push_sequence() as parameters:
@@ -268,7 +267,6 @@ def _encrypt_blob(
     )
     kek = key.get_kek(key_identifier)
 
-    enc_cek_algorithm = AlgorithmOID.AES256_WRAP
     enc_cek_parameters = None
     enc_cek = cek_encrypt(
         enc_cek_algorithm,
