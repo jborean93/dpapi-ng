@@ -170,7 +170,7 @@ class DPAPINGBlob:
                                         with originatorSequence.push_sequence() as originatorSequence2:
                                             with originatorSequence2.push_sequence() as originatorSequence3:
                                                 with originatorSequence3.push_sequence() as originatorSequence4:
-                                                    originatorSequence4.write_octet_string('SID'.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
+                                                   originatorSequence4.write_octet_string(b'SID', ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
                                                     originatorSequence4.write_octet_string(sid.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
                             with RecipientInfo.push_sequence() as KEKRecipientInfo:
                                 KEKRecipientInfo.write_object_identifier('2.16.840.1.101.3.4.1.45') #aes256-wrap
