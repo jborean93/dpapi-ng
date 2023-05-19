@@ -153,17 +153,17 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
-    def pack(self, sid:str) -> bytes:
-        # TODO: it's not very nice to pass sid as separate parameter here, should be extracted from self.security_descriptor
+    def pack(self, protection_descriptor:str) -> bytes:
+        # TODO: it's not very nice to pass protection_descriptor as separate parameter here, should be extracted from self.security_descriptor
         writer = ASN1Writer()
         with writer.push_sequence() as ContentInfo:
             ContentInfo.write_object_identifier(EnvelopedData.CONTENT_TYPE_ENVELOPED_DATA_OID)
             with ContentInfo.push_sequence(ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC,tag_number=0,is_constructed=True)) as Content:
                 with Content.push_sequence() as enveloped_data:
-                    enveloped_data.write_integer(2)
+                    enveloped_data.write_integer(2) # EnvelopedData CMSVersion
                     with enveloped_data.push_set() as recipient_infos:
                         with recipient_infos.push_sequence(ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC,tag_number=2,is_constructed=True)) as recipient_info:
-                            recipient_info.write_integer(4)
+                            recipient_info.write_integer(4) # KEKRecipientInfo CMSVersion
                             with recipient_info.push_sequence() as key_agree_recipient_info:
                                 key_agree_recipient_info.write_octet_string(self.key_identifier.pack())
                                 with key_agree_recipient_info.push_sequence() as originator:
@@ -174,7 +174,7 @@ class DPAPINGBlob:
                                             with originator_sequence_2.push_sequence() as originator_sequence_3:
                                                 with originator_sequence_3.push_sequence() as originator_sequence_4:
                                                     originator_sequence_4.write_octet_string(b'SID', ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
-                                                    originator_sequence_4.write_octet_string(sid.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
+                                                    originator_sequence_4.write_octet_string(protection_descriptor.encode('utf-8'), ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING))
                             with recipient_info.push_sequence() as kek_recipient_info:
                                 kek_recipient_info.write_object_identifier(self.enc_cek_algorithm)
                             recipient_info.write_octet_string(self.enc_cek)

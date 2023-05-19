@@ -234,7 +234,7 @@ def _encrypt_blob(
     blob: bytes,
     key: GroupKeyEnvelope,
     security_descriptor: bytes,
-    sid: str,
+    protection_descriptor: str,
 ) -> bytes:
     # Generate cek and encrypt our payload.
     cek = AESGCM.generate_key(bit_length=256)
@@ -286,7 +286,7 @@ def _encrypt_blob(
             enc_content=enc_content,
             enc_content_algorithm=enc_content_algorithm,
             enc_content_parameters=enc_content_parameters,
-        ).pack(sid)
+        ).pack(protection_descriptor)
 
 
 class RootKey(t.NamedTuple):
@@ -574,7 +574,7 @@ def ncrypt_unprotect_secret(
 
 def ncrypt_protect_secret(
     data: bytes,
-    sid: string,
+    protection_descriptor: string,
     server: t.Optional[str] = None,
     username: t.Optional[str] = None,
     password: t.Optional[str] = None,
@@ -627,7 +627,7 @@ def ncrypt_protect_secret(
     sd = sd_to_bytes(
         owner="S-1-5-18",
         group="S-1-5-18",
-        dacl=[ace_to_bytes(sid, 3), ace_to_bytes("S-1-1-0", 2)],
+        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
     )
 
     cache = cache or KeyCache()
@@ -657,7 +657,7 @@ def ncrypt_protect_secret(
 
     cache._store_key(sd, rk)
 
-    return _encrypt_blob(data, rk, sd, sid)
+    return _encrypt_blob(data, rk, sd, protection_descriptor)
 
 
 async def async_ncrypt_unprotect_secret(
@@ -740,7 +740,7 @@ async def async_ncrypt_unprotect_secret(
 
 async def async_ncrypt_protect_secret(
     data: bytes,
-    sid: string,
+    protection_descriptor: string,
     server: t.Optional[str] = None,
     username: t.Optional[str] = None,
     password: t.Optional[str] = None,
@@ -793,7 +793,7 @@ async def async_ncrypt_protect_secret(
     sd = sd_to_bytes(
         owner="S-1-5-18",
         group="S-1-5-18",
-        dacl=[ace_to_bytes(sid, 3), ace_to_bytes("S-1-1-0", 2)],
+        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
     )
 
     cache = cache or KeyCache()
@@ -823,4 +823,4 @@ async def async_ncrypt_protect_secret(
 
     cache._store_key(sd, rk)
 
-    return _encrypt_blob(data, rk, sd, sid)
+    return _encrypt_blob(data, rk, sd, protection_descriptor)
