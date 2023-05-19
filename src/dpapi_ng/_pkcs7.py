@@ -47,7 +47,8 @@ class ContentInfo:
 
 @dataclasses.dataclass
 class EnvelopedData:
-    content_type = "1.2.840.113549.1.7.3"
+    CONTENT_TYPE_ENVELOPED_DATA_OID = "1.2.840.113549.1.7.3"
+    CONTENT_TYPE_DATA_OID = "1.2.840.113549.1.7.1"
 
     version: int
     recipient_infos: t.List[RecipientInfo]

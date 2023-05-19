@@ -9,7 +9,7 @@ import os
 
 from ._asn1 import ASN1Writer
 from ._blob import DPAPINGBlob, KeyIdentifier
-from ._crypto import cek_decrypt, cek_encrypt, content_decrypt, content_encrypt
+from ._crypto import cek_decrypt, cek_encrypt, content_decrypt, content_encrypt, AlgorithmOID
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from ._security_descriptor import ace_to_bytes, sd_to_bytes
 from ._dns import async_lookup_dc, lookup_dc
@@ -245,7 +245,7 @@ def _encrypt_blob(
         parameters.write_octet_string(cek_iv)
         parameters.write_integer(16)
 
-    enc_content_algorithm = "2.16.840.1.101.3.4.1.46"
+    enc_content_algorithm = AlgorithmOID.AES256_GCM
     enc_content_parameters = parameters_writer.get_data()
     enc_content = content_encrypt(
         enc_content_algorithm,
@@ -268,7 +268,7 @@ def _encrypt_blob(
     )
     kek = key.get_kek(key_identifier)
 
-    enc_cek_algorithm = "2.16.840.1.101.3.4.1.45"
+    enc_cek_algorithm = AlgorithmOID.AES256_WRAP
     enc_cek_parameters = None
     enc_cek = cek_encrypt(
         enc_cek_algorithm,

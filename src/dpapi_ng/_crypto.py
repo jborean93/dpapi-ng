@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import typing as t
+import enum
 
 from cryptography.hazmat.primitives import hashes, keywrap
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -14,13 +15,20 @@ from cryptography.hazmat.primitives.kdf.kbkdf import KBKDFHMAC, CounterLocation,
 from ._asn1 import ASN1Reader
 
 
+class AlgorithmOID(str, enum.Enum):
+    """OIDs for cryptographic algorithms."""
+
+    AES256_WRAP = "2.16.840.1.101.3.4.1.45"
+    AES256_GCM  = "2.16.840.1.101.3.4.1.46"
+
+
 def cek_decrypt(
     algorithm: str,
     parameters: t.Optional[bytes],
     kek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.45":  # AES256-wrap
+    if algorithm == AlgorithmOID.AES256_WRAP:
         return keywrap.aes_key_unwrap(kek, value)
 
     else:
@@ -33,7 +41,7 @@ def cek_encrypt(
     kek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.45":  # AES256-wrap
+    if algorithm == AlgorithmOID.AES256_WRAP:
         return keywrap.aes_key_wrap(kek, value)
 
     else:
@@ -46,7 +54,7 @@ def content_decrypt(
     cek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.46":  # AES256-GCM
+    if algorithm == AlgorithmOID.AES256_GCM:
         if not parameters:
             raise ValueError("Expecting parameters for AES256 GCM decryption but received none.")
 
@@ -66,7 +74,7 @@ def content_encrypt(
     cek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.46":  # AES256-GCM
+    if algorithm == AlgorithmOID.AES256_GCM:
         if not parameters:
             raise ValueError("Expecting parameters for AES256 GCM decryption but received none.")
 
