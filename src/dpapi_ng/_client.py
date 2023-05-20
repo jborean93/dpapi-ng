@@ -444,6 +444,16 @@ class KeyCache:
         Returns:
             Optional[GroupKeyEnvelope]: The cached key if one was available.
         """
+        # get encryption key
+        if root_key_id == None and l0 == -1 and l1 == -1 and l2 == -1:
+            for _uuid, value in self._seed_keys.items():
+                for _sd, value2 in value.items():
+                    if _sd == target_sd:
+                        for _l0, value3 in value2.items():
+                            if isinstance(value3, GroupKeyEnvelope):
+                                return value3
+
+        # get decryption key
         seed_key = self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {}).get(l0, None)
         if seed_key and (seed_key.l1 > l1 or (seed_key.l1 == l1 and seed_key.l2 >= l2)):
             return seed_key
