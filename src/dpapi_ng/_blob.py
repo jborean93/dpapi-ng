@@ -153,7 +153,6 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
-    @classmethod
     def pack(
         self,
         protection_descriptor: str,
