@@ -153,7 +153,21 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
-    def pack(self, protection_descriptor:str) -> bytes:
+    @classmethod
+    def pack(
+        self,
+        protection_descriptor: str,
+        blob_in_envelope: bool = True,
+    ) -> bytes:
+        """
+        Args:
+            protection_descriptor: The protection descriptor to embed in the EnvelopedData structure.
+            blob_in_envelope: True to store the encrypted blob in the EnvelopedData structure (NCryptProtectSecret general),
+                False to append the encrypted blob after the EnvelopedData structure (LAPS style).
+
+        Returns:
+            bytes: The DPAPI NG Blob data.
+        """
         # TODO: it's not very nice to pass protection_descriptor as separate parameter here, should be extracted from self.security_descriptor
         writer = ASN1Writer()
         with writer.push_sequence() as ContentInfo:
@@ -183,10 +197,12 @@ class DPAPINGBlob:
                         with encrypted_content_info.push_sequence() as content_encryption_algorithm_identifier:
                             content_encryption_algorithm_identifier.write_object_identifier(self.enc_content_algorithm)
                             content_encryption_algorithm_identifier._data.extend(self.enc_content_parameters)
+                        if blob_in_envelope: encrypted_content_info.write_octet_string(self.enc_content, tag=ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC,tag_number=0,is_constructed=False))
+
         return b"".join(
             [
                 writer.get_data(),
-                self.enc_content,
+                self.enc_content if not blob_in_envelope else b"",
             ]
         )
 
