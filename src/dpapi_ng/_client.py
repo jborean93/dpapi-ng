@@ -574,6 +574,7 @@ def ncrypt_protect_secret(
     data: bytes,
     protection_descriptor: string,
     server: t.Optional[str] = None,
+    domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,
     password: t.Optional[str] = None,
     auth_protocol: str = "negotiate",
@@ -599,6 +600,7 @@ def ncrypt_protect_secret(
     Args:
         data: The bytes blob to encrypt.
         server: The domain controller to lookup the root key info.
+        domain_name: The domain name to query the domain controller hostname via DNS.
         username: The username to encrypt the DPAPI-NG blob as.
         password: The password for the user.
         auth_protocol: The authentication protocol to use, defaults to
@@ -638,7 +640,7 @@ def ncrypt_protect_secret(
     )
     if not rk:
         if not server:
-            srv = lookup_dc(blob.key_identifier.domain_name)
+            srv = lookup_dc(domain_name)
             server = srv.target
 
         rk = _sync_get_key(
@@ -740,6 +742,7 @@ async def async_ncrypt_protect_secret(
     data: bytes,
     protection_descriptor: string,
     server: t.Optional[str] = None,
+    domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,
     password: t.Optional[str] = None,
     auth_protocol: str = "negotiate",
@@ -765,6 +768,7 @@ async def async_ncrypt_protect_secret(
     Args:
         data: The bytes blob to encrypt.
         server: The domain controller to lookup the root key info.
+        domain_name: The domain name to query the domain controller hostname via DNS.
         username: The username to encrypt the DPAPI-NG blob as.
         password: The password for the user.
         auth_protocol: The authentication protocol to use, defaults to
@@ -804,7 +808,7 @@ async def async_ncrypt_protect_secret(
     )
     if not rk:
         if not server:
-            srv = await async_lookup_dc(blob.key_identifier.domain_name)
+            srv = await async_lookup_dc(domain_name)
             server = srv.target
 
         rk = await _async_get_key(
