@@ -3,7 +3,13 @@
 
 from __future__ import annotations
 
-from ._client import KeyCache, async_ncrypt_protect_secret, async_ncrypt_unprotect_secret, ncrypt_protect_secret, ncrypt_unprotect_secret
+from ._client import (
+    KeyCache,
+    async_ncrypt_protect_secret,
+    async_ncrypt_unprotect_secret,
+    ncrypt_protect_secret,
+    ncrypt_unprotect_secret,
+)
 
 __all__ = [
     "KeyCache",

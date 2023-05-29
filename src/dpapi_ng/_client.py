@@ -6,11 +6,18 @@ from __future__ import annotations
 import typing as t
 import uuid
 
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
 from ._asn1 import ASN1Writer
 from ._blob import DPAPINGBlob, KeyIdentifier
-from ._crypto import AlgorithmOID, cek_decrypt, cek_encrypt, cek_generate, content_decrypt, content_encrypt
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from ._security_descriptor import ace_to_bytes, sd_to_bytes
+from ._crypto import (
+    AlgorithmOID,
+    cek_decrypt,
+    cek_encrypt,
+    cek_generate,
+    content_decrypt,
+    content_encrypt,
+)
 from ._dns import async_lookup_dc, lookup_dc
 from ._epm import EPM, EptMap, EptMapResult, TCPFloor, build_tcpip_tower
 from ._gkdi import (
@@ -35,6 +42,7 @@ from ._rpc import (
     bind_time_feature_negotiation,
     create_rpc_connection,
 )
+from ._security_descriptor import ace_to_bytes, sd_to_bytes
 
 _EPM_CONTEXTS = [
     ContextElement(
@@ -261,7 +269,7 @@ def _encrypt_blob(
         l1=key.l1,
         l2=key.l2,
         root_key_identifier=key.root_key_identifier,
-        key_info=b'',
+        key_info=b"",
         domain_name=key.domain_name,
         forest_name=key.forest_name,
     )
@@ -276,15 +284,15 @@ def _encrypt_blob(
     )
 
     return DPAPINGBlob(
-            key_identifier=key_identifier,
-            security_descriptor=security_descriptor,
-            enc_cek=enc_cek,
-            enc_cek_algorithm=enc_cek_algorithm,
-            enc_cek_parameters=enc_cek_parameters,
-            enc_content=enc_content,
-            enc_content_algorithm=enc_content_algorithm,
-            enc_content_parameters=enc_content_parameters,
-        ).pack(protection_descriptor)
+        key_identifier=key_identifier,
+        security_descriptor=security_descriptor,
+        enc_cek=enc_cek,
+        enc_cek_algorithm=enc_cek_algorithm,
+        enc_cek_parameters=enc_cek_parameters,
+        enc_content=enc_content,
+        enc_content_algorithm=enc_content_algorithm,
+        enc_content_parameters=enc_content_parameters,
+    ).pack(protection_descriptor)
 
 
 class RootKey(t.NamedTuple):
@@ -423,7 +431,7 @@ class KeyCache:
     def _get_key(
         self,
         target_sd: bytes,
-        root_key_id: uuid.UUID,
+        root_key_id: t.Optional[uuid.UUID],
         l0: int,
         l1: int,
         l2: int,
@@ -452,17 +460,21 @@ class KeyCache:
                         for _l0, value3 in value2.items():
                             if isinstance(value3, GroupKeyEnvelope):
                                 return value3
+        if root_key_id:
+            non_null_root_key_id: uuid.UUID = root_key_id
+        else:
+            return None
 
         # get decryption key
-        seed_key = self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {}).get(l0, None)
+        seed_key = self._seed_keys.setdefault(non_null_root_key_id, {}).setdefault(target_sd, {}).get(l0, None)
         if seed_key and (seed_key.l1 > l1 or (seed_key.l1 == l1 and seed_key.l2 >= l2)):
             return seed_key
 
-        root_key = self._root_keys.get(root_key_id, None)
+        root_key = self._root_keys.get(non_null_root_key_id, None)
         if root_key:
             l1_seed = compute_l1_key(
                 target_sd,
-                root_key_id,
+                non_null_root_key_id,
                 l0,
                 root_key.key,
                 KDFParameters.unpack(root_key.kdf_parameters).hash_algorithm,
@@ -474,7 +486,7 @@ class KeyCache:
                 l0=l0,
                 l1=31,
                 l2=31,
-                root_key_identifier=root_key_id,
+                root_key_identifier=non_null_root_key_id,
                 kdf_algorithm=root_key.kdf_algorithm,
                 kdf_parameters=root_key.kdf_parameters,
                 secret_algorithm=root_key.secret_algorithm,
@@ -486,7 +498,7 @@ class KeyCache:
                 l1_key=l1_seed,
                 l2_key=b"",
             )
-            return self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {}).setdefault(l0, gke)
+            return self._seed_keys.setdefault(non_null_root_key_id, {}).setdefault(target_sd, {}).setdefault(l0, gke)
 
         return None
 
@@ -582,7 +594,7 @@ def ncrypt_unprotect_secret(
 
 def ncrypt_protect_secret(
     data: bytes,
-    protection_descriptor: string,
+    protection_descriptor: str,
     server: t.Optional[str] = None,
     domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,
@@ -750,7 +762,7 @@ async def async_ncrypt_unprotect_secret(
 
 async def async_ncrypt_protect_secret(
     data: bytes,
-    protection_descriptor: string,
+    protection_descriptor: str,
     server: t.Optional[str] = None,
     domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,

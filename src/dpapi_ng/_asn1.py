@@ -769,7 +769,7 @@ def _pack_asn1_octet_string(
 
 
 def _pack_asn1_object_identifier(
-    value: string,
+    value: str,
     tag: t.Optional[ASN1Tag] = None,
 ) -> bytes:
     if not tag:
@@ -778,19 +778,19 @@ def _pack_asn1_object_identifier(
     return _pack_asn1(tag.tag_class, tag.is_constructed, tag.tag_number, _encode_object_identifier(value))
 
 
-def _encode_object_identifier(oid:str) -> bytes:
+def _encode_object_identifier(oid: str) -> bytes:
     """Encode an object identifier."""
-    cmps = list(map(int, oid.split('.')))
+    cmps = list(map(int, oid.split(".")))
     if cmps[0] > 39 or cmps[1] > 39:
-        raise Error('Illegal object identifier')
+        raise ValueError("Illegal object identifier")
     cmps = [40 * cmps[0] + cmps[1]] + cmps[2:]
     cmps.reverse()
     result = []
     for cmp_data in cmps:
-        result.append(cmp_data & 0x7f)
-        while cmp_data > 0x7f:
+        result.append(cmp_data & 0x7F)
+        while cmp_data > 0x7F:
             cmp_data >>= 7
-            result.append(0x80 | (cmp_data & 0x7f))
+            result.append(0x80 | (cmp_data & 0x7F))
     result.reverse()
     return bytes(result)
 

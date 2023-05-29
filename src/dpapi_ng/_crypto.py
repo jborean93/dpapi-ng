@@ -3,9 +3,9 @@
 
 from __future__ import annotations
 
-import typing as t
 import enum
 import os
+import typing as t
 
 from cryptography.hazmat.primitives import hashes, keywrap
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -20,7 +20,7 @@ class AlgorithmOID(str, enum.Enum):
     """OIDs for cryptographic algorithms."""
 
     AES256_WRAP = "2.16.840.1.101.3.4.1.45"
-    AES256_GCM  = "2.16.840.1.101.3.4.1.46"
+    AES256_GCM = "2.16.840.1.101.3.4.1.46"
 
 
 def cek_decrypt(
