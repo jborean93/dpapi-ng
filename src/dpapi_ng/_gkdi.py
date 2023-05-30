@@ -890,7 +890,23 @@ def compute_public_key(
         ).pack()
 
     elif secret_algorithm.startswith("ECDH_P"):
-        raise NotImplementedError("FIXME implement support for ECDH keys")
+        ecdh_pub_key_info = ECDHKey.unpack(peer_public_key)
+        curve, secret_hash_algorithm = ecdh_pub_key_info.curve_and_hash
+
+        ecdh_pub_key = ec.EllipticCurvePublicNumbers(ecdh_pub_key_info.x, ecdh_pub_key_info.y, curve).public_key()
+        ecdh_private = ec.derive_private_key(
+            int.from_bytes(private_key, byteorder="big"),
+            curve,
+        )
+        shared_secret = ecdh_private.exchange(ec.ECDH(), ecdh_pub_key)
+
+        print(ecdh_pub_key_info.curve_name)
+        return ECDHKey(
+            ecdh_pub_key_info.curve_name,
+            ecdh_pub_key_info.key_length,
+            ecdh_private.public_key().public_numbers().x,
+            ecdh_private.public_key().public_numbers().y,
+        ).pack()
 
     else:
         raise NotImplementedError(f"Unknown secret agreement algorithm '{secret_algorithm}'")
