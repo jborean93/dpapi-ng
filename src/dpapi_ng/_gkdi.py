@@ -898,9 +898,7 @@ def compute_public_key(
             int.from_bytes(private_key, byteorder="big"),
             curve,
         )
-        shared_secret = ecdh_private.exchange(ec.ECDH(), ecdh_pub_key)
 
-        print(ecdh_pub_key_info.curve_name)
         return ECDHKey(
             ecdh_pub_key_info.curve_name,
             ecdh_pub_key_info.key_length,
