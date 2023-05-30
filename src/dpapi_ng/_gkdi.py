@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
 import typing as t
 import uuid
 
@@ -526,6 +527,55 @@ class GroupKeyEnvelope:
                 32,
             )
 
+    def new_kek(
+        self,
+    ) -> tuple[bytes, KeyIdentifier]:
+        if self.kdf_algorithm != "SP800_108_CTR_HMAC":
+            raise NotImplementedError(f"Unknown KDF algorithm '{self.kdf_algorithm}'")
+
+        kdf_parameters = KDFParameters.unpack(self.kdf_parameters)
+        hash_algo = kdf_parameters.hash_algorithm
+
+        if self.is_public_key:
+            # If is_public_key flag is set, the L2 key is the peer's public key
+            private_key = os.urandom(math.ceil(self.private_key_length / 8))
+            kek = compute_kek(
+                algorithm=hash_algo,
+                secret_algorithm=self.secret_algorithm,
+                secret_parameters=self.secret_parameters,
+                private_key=private_key,
+                public_key=self.l2_key,
+            )
+
+            key_info = compute_public_key(
+                secret_algorithm=self.secret_algorithm,
+                secret_parameters=self.secret_parameters,
+                private_key=private_key,
+                peer_public_key=self.l2_key,
+            )
+        else:
+            key_info = os.urandom(32)
+            kek = kdf(
+                hash_algo,
+                self.l2_key,
+                KDS_SERVICE_LABEL,
+                key_info,
+                32,
+            )
+
+        key_identifier = KeyIdentifier(
+            version=1,
+            flags=self.flags,
+            l0=self.l0,
+            l1=self.l1,
+            l2=self.l2,
+            root_key_identifier=self.root_key_identifier,
+            key_info=key_info,
+            domain_name=self.domain_name,
+            forest_name=self.forest_name,
+        )
+        return kek, key_identifier
+
     @classmethod
     def unpack(
         cls,
@@ -733,10 +783,6 @@ def compute_kek_from_public_key(
     public_key: bytes,
     private_key_length: int,
 ) -> bytes:
-    # Special thanks for Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski
-    # for providing access to CQDPAPINGPFXDecrypter.exe which contains the
-    # BCrypt* APIs Microsoft use to derive the KEK.
-
     private_key = kdf(
         algorithm,
         seed,
@@ -744,6 +790,26 @@ def compute_kek_from_public_key(
         (secret_algorithm + "\0").encode("utf-16-le"),
         private_key_length,
     )
+
+    return compute_kek(
+        algorithm,
+        secret_algorithm=secret_algorithm,
+        secret_parameters=secret_parameters,
+        private_key=private_key,
+        public_key=public_key,
+    )
+
+
+def compute_kek(
+    algorithm: hashes.HashAlgorithm,
+    secret_algorithm: str,
+    secret_parameters: t.Optional[bytes],
+    private_key: bytes,
+    public_key: bytes,
+) -> bytes:
+    # Special thanks for Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski
+    # for providing access to CQDPAPINGPFXDecrypter.exe which contains the
+    # BCrypt* APIs Microsoft use to derive the KEK.
 
     secret_hash_algorithm: hashes.HashAlgorithm
     if secret_algorithm == "DH":
@@ -798,3 +864,33 @@ def compute_kek_from_public_key(
         kek_context,
         32,
     )
+
+
+def compute_public_key(
+    secret_algorithm: str,
+    secret_parameters: t.Optional[bytes],
+    private_key: bytes,
+    peer_public_key: bytes,
+) -> bytes:
+    if secret_algorithm == "DH":
+        dh_pub_key = FFCDHKey.unpack(peer_public_key)
+
+        # We can derive our public key based on the DH formula.
+        # X = G**x mod p
+        my_pub_key = pow(
+            dh_pub_key.generator,
+            int.from_bytes(private_key, byteorder="big"),
+            dh_pub_key.field_order,
+        )
+        return FFCDHKey(
+            dh_pub_key.key_length,
+            dh_pub_key.field_order,
+            dh_pub_key.generator,
+            my_pub_key,
+        ).pack()
+
+    elif secret_algorithm.startswith("ECDH_P"):
+        raise NotImplementedError("FIXME implement support for ECDH keys")
+
+    else:
+        raise NotImplementedError(f"Unknown secret agreement algorithm '{secret_algorithm}'")

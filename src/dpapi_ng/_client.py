@@ -6,10 +6,8 @@ from __future__ import annotations
 import typing as t
 import uuid
 
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-
 from ._asn1 import ASN1Writer
-from ._blob import DPAPINGBlob, KeyIdentifier
+from ._blob import DPAPINGBlob
 from ._crypto import (
     AlgorithmOID,
     cek_decrypt,
@@ -261,20 +259,7 @@ def _encrypt_blob(
         blob,
     )
 
-    # Wrap the cek with the kek.
-    key_identifier = KeyIdentifier(
-        version=1,
-        flags=key.flags,
-        l0=key.l0,
-        l1=key.l1,
-        l2=key.l2,
-        root_key_identifier=key.root_key_identifier,
-        key_info=b"",
-        domain_name=key.domain_name,
-        forest_name=key.forest_name,
-    )
-    kek = key.get_kek(key_identifier)
-
+    kek, key_identifier = key.new_kek()
     enc_cek_parameters = None
     enc_cek = cek_encrypt(
         enc_cek_algorithm,
