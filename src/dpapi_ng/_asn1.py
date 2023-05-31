@@ -772,6 +772,8 @@ def _pack_asn1_object_identifier(
     value: str,
     tag: t.Optional[ASN1Tag] = None,
 ) -> bytes:
+    """Packs an object identifier value represented as string into an
+    ASN.1 OCTET STRING byte value with optional universal tagging."""
     if not tag:
         tag = ASN1Tag.universal_tag(TypeTagNumber.OBJECT_IDENTIFIER)
 

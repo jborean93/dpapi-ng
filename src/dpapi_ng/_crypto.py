@@ -89,7 +89,7 @@ def content_encrypt(
 ) -> bytes:
     if algorithm == AlgorithmOID.AES256_GCM:
         if not parameters:
-            raise ValueError("Expecting parameters for AES256 GCM decryption but received none.")
+            raise ValueError("Expecting parameters for AES256 GCM encryption but received none.")
 
         reader = ASN1Reader(parameters).read_sequence()
         iv = reader.read_octet_string()
