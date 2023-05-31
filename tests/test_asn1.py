@@ -266,6 +266,20 @@ def test_writer_write_octet_with_tag() -> None:
     assert actual == expected
 
 
+def test_writer_write_object_identifier() -> None:
+    expected = b"\x06\t*\x86H\x86\xf7\r\x01\x07\x03"
+    with asn1.ASN1Writer() as writer:
+        writer.write_object_identifier("1.2.840.113549.1.7.3")
+
+    actual = writer.get_data()
+    assert actual == expected
+
+
+def test_fail_pack_invalid_object_identifier() -> None:
+    with pytest.raises(ValueError, match="Illegal object identifier"):
+        asn1._encode_object_identifier("40.50.1.2.3")
+
+
 def test_writer_write_enumerated() -> None:
     expected = b"\x0A\x01\x01"
     with asn1.ASN1Writer() as writer:

@@ -36,6 +36,63 @@ def _load_root_key(scenario: str) -> tuple[bytes, dpapi_ng.KeyCache]:
     return base64.b16decode(data["Data"]), cache
 
 
+def _load_seed_key(scenario: str) -> dpapi_ng.KeyCache:
+    data = json.loads(get_test_data(f"{scenario}.json"))
+
+    cache = dpapi_ng.KeyCache()
+    cache._store_key(
+        target_sd=base64.b16decode(data["SecurityDescriptor"]),
+        key=dpapi_ng._gkdi.GroupKeyEnvelope(
+            version=data["Version"],
+            flags=data["Flags"],
+            l0=data["L0"],
+            l1=data["L1"],
+            l2=data["L2"],
+            root_key_identifier=uuid.UUID(data["RootKeyId"]),
+            kdf_algorithm=data["KdfAlgorithm"],
+            kdf_parameters=base64.b16decode(data["KdfParameters"]),
+            secret_algorithm=data["SecretAlgorithm"],
+            secret_parameters=base64.b16decode(data["SecretParameters"]),
+            private_key_length=data["PrivateKeyLength"],
+            public_key_length=data["PublicKeyLength"],
+            domain_name=data["DomainName"],
+            forest_name=data["ForestName"],
+            l1_key=base64.b16decode(data["L1Key"]),
+            l2_key=base64.b16decode(data["L2Key"]),
+        ),
+    )
+
+    return cache
+
+
+def test_protect_secret() -> None:
+    test_data = b"schorschii"
+    test_protection_descriptor = "S-1-5-21-2185496602-3367037166-1388177638-1103"
+    test_root_key_identifier = "c1f25b76-d435-4015-1259-b14e5cca4e00"
+
+    key_cache = _load_seed_key("seed_key")
+
+    encrypted = dpapi_ng.ncrypt_protect_secret(
+        test_data, test_protection_descriptor, root_key_identifier=uuid.UUID(test_root_key_identifier), cache=key_cache
+    )
+    decrypted = dpapi_ng.ncrypt_unprotect_secret(encrypted, cache=key_cache)
+    assert test_data == decrypted
+
+
+async def test_async_protect_secret() -> None:
+    test_data = b"schorschii"
+    test_protection_descriptor = "S-1-5-21-2185496602-3367037166-1388177638-1103"
+    test_root_key_identifier = "c1f25b76-d435-4015-1259-b14e5cca4e00"
+
+    key_cache = _load_seed_key("seed_key")
+
+    encrypted = await dpapi_ng.async_ncrypt_protect_secret(
+        test_data, test_protection_descriptor, root_key_identifier=uuid.UUID(test_root_key_identifier), cache=key_cache
+    )
+    decrypted = await dpapi_ng.async_ncrypt_unprotect_secret(encrypted, cache=key_cache)
+    assert test_data == decrypted
+
+
 @pytest.mark.parametrize(
     "scenario",
     [
