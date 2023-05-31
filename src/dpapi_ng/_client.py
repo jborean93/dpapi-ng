@@ -416,7 +416,7 @@ class KeyCache:
     def _get_key(
         self,
         target_sd: bytes,
-        root_key_id: t.Optional[uuid.UUID],
+        root_key_id: uuid.UUID,
         l0: int,
         l1: int,
         l2: int,
@@ -437,29 +437,19 @@ class KeyCache:
         Returns:
             Optional[GroupKeyEnvelope]: The cached key if one was available.
         """
-        # get encryption key
-        if root_key_id == None and l0 == -1 and l1 == -1 and l2 == -1:
-            for _uuid, value in self._seed_keys.items():
-                for _sd, value2 in value.items():
-                    if _sd == target_sd:
-                        for _l0, value3 in value2.items():
-                            if isinstance(value3, GroupKeyEnvelope):
-                                return value3
-        if root_key_id:
-            non_null_root_key_id: uuid.UUID = root_key_id
-        else:
-            return None
-
-        # get decryption key
-        seed_key = self._seed_keys.setdefault(non_null_root_key_id, {}).setdefault(target_sd, {}).get(l0, None)
+        l0_and_seed_key = self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {})
+        if l0_and_seed_key and l0 == -1 and l1 == -1 and l2 == -1:
+            for l0, seed_key1 in l0_and_seed_key.items():
+                return seed_key1
+        seed_key = l0_and_seed_key.get(l0, None)
         if seed_key and (seed_key.l1 > l1 or (seed_key.l1 == l1 and seed_key.l2 >= l2)):
             return seed_key
 
-        root_key = self._root_keys.get(non_null_root_key_id, None)
+        root_key = self._root_keys.get(root_key_id, None)
         if root_key:
             l1_seed = compute_l1_key(
                 target_sd,
-                non_null_root_key_id,
+                root_key_id,
                 l0,
                 root_key.key,
                 KDFParameters.unpack(root_key.kdf_parameters).hash_algorithm,
@@ -471,7 +461,7 @@ class KeyCache:
                 l0=l0,
                 l1=31,
                 l2=31,
-                root_key_identifier=non_null_root_key_id,
+                root_key_identifier=root_key_id,
                 kdf_algorithm=root_key.kdf_algorithm,
                 kdf_parameters=root_key.kdf_parameters,
                 secret_algorithm=root_key.secret_algorithm,
@@ -483,7 +473,7 @@ class KeyCache:
                 l1_key=l1_seed,
                 l2_key=b"",
             )
-            return self._seed_keys.setdefault(non_null_root_key_id, {}).setdefault(target_sd, {}).setdefault(l0, gke)
+            return self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {}).setdefault(l0, gke)
 
         return None
 
@@ -555,6 +545,7 @@ def ncrypt_unprotect_secret(
         blob.key_identifier.l1,
         blob.key_identifier.l2,
     )
+
     if not rk:
         if not server:
             srv = lookup_dc(blob.key_identifier.domain_name)
@@ -580,6 +571,7 @@ def ncrypt_unprotect_secret(
 def ncrypt_protect_secret(
     data: bytes,
     protection_descriptor: str,
+    root_key_identifier: t.Optional[uuid.UUID] = None,
     server: t.Optional[str] = None,
     domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,
@@ -626,7 +618,6 @@ def ncrypt_protect_secret(
     _NCryptProtectSecret:
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
     """
-    root_key_identifier = None
     key_identifier_l0 = -1
     key_identifier_l1 = -1
     key_identifier_l2 = -1
@@ -638,13 +629,17 @@ def ncrypt_protect_secret(
     )
 
     cache = cache or KeyCache()
-    rk = cache._get_key(
-        sd,
-        root_key_identifier,
-        key_identifier_l0,
-        key_identifier_l1,
-        key_identifier_l2,
-    )
+    rk = None
+    if root_key_identifier:
+        non_null_root_key_identifier: uuid.UUID = root_key_identifier
+        rk = cache._get_key(
+            sd,
+            non_null_root_key_identifier,
+            key_identifier_l0,
+            key_identifier_l1,
+            key_identifier_l2,
+        )
+
     if not rk:
         if not server:
             srv = lookup_dc(domain_name)
@@ -748,6 +743,7 @@ async def async_ncrypt_unprotect_secret(
 async def async_ncrypt_protect_secret(
     data: bytes,
     protection_descriptor: str,
+    root_key_identifier: t.Optional[uuid.UUID] = None,
     server: t.Optional[str] = None,
     domain_name: t.Optional[str] = None,
     username: t.Optional[str] = None,
@@ -794,7 +790,6 @@ async def async_ncrypt_protect_secret(
     _NCryptProtectSecret:
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
     """
-    root_key_identifier = None
     key_identifier_l0 = -1
     key_identifier_l1 = -1
     key_identifier_l2 = -1
@@ -806,13 +801,17 @@ async def async_ncrypt_protect_secret(
     )
 
     cache = cache or KeyCache()
-    rk = cache._get_key(
-        sd,
-        root_key_identifier,
-        key_identifier_l0,
-        key_identifier_l1,
-        key_identifier_l2,
-    )
+    rk = None
+    if root_key_identifier:
+        non_null_root_key_identifier: uuid.UUID = root_key_identifier
+        rk = cache._get_key(
+            sd,
+            root_key_identifier,
+            key_identifier_l0,
+            key_identifier_l1,
+            key_identifier_l2,
+        )
+
     if not rk:
         if not server:
             srv = await async_lookup_dc(domain_name)

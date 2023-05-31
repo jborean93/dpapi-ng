@@ -98,13 +98,17 @@ For decryption, the domain controller hostname is automatically retrieved throug
 It will attempt to authenticate with the current user identifier which on Linux will only exist if `kinit` has already been called to retrieve a user's ticket.
 Otherwise if no identity is available, the `username` and `password` kwargs can be used to specify a custom user.
 
-The following kwargs can be used for both `ncrypt_unprotect_secret` and `async_ncrypt_unprotect_secret`.
+The following kwargs can be used for `ncrypt_unprotect_secret`, `async_ncrypt_unprotect_secret`, `ncrypt_protect_secret` and `async_ncrypt_protect_secret`.
 
 * `server`: Use this server as the RPC target if a key needs to be retrieved
 * `username`: The username to authenticate as for the RPC connection
 * `password`: The password to authenticate with for the RPC connection
 * `auth_protocol`: The authentication protocol (`negotiate`, `kerberos`, `ntlm`) to use for the RPC connection
 * `cache`: A cache to store keys retrieved for future operation
+
+In addition to that, `ncrypt_protect_secret` and `async_ncrypt_protect_secret` take the following additional kwarg.
+
+* `root_key_identifier`: root key identifier UUID, necessary in order to make the cache work for these functions
 
 It is also possible to decrypt the DPAPI-NG blob by providing the root key stored in the domain.
 This can either be retrieved using an offline attack or through an LDAP query if running as a Domain Admin user.
