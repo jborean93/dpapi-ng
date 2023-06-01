@@ -38,6 +38,7 @@
       src: '{{ item }}'
       dest: C:\temp\{{ item }}
     loop:
+    - ConvertFrom-DpapiNgBlob.ps1
     - ConvertTo-DpapiNgBlob.ps1
     - New-KdsRootKey.ps1
 
@@ -63,6 +64,21 @@
     microsoft.ad.user:
       name: '{{ domain_username }}'
       upn: '{{ domain_user_upn }}'
+      description: '{{ domain_username }} Domain Account'
+      password: '{{ domain_password }}'
+      password_never_expires: true
+      update_password: when_changed
+      groups:
+        set:
+        - Domain Admins
+        - Domain Users
+        - Enterprise Admins
+      state: present
+
+  - name: create domain username for other test
+    microsoft.ad.user:
+      name: '{{ domain_username2 }}'
+      upn: '{{ domain_user_upn2 }}'
       description: '{{ domain_username }} Domain Account'
       password: '{{ domain_password }}'
       password_never_expires: true
@@ -103,61 +119,6 @@
     vars:
       ansible_become_user: '{{ domain_user_upn }}'
       ansible_become_pass: '{{ domain_password }}'
-
-  - name: create test blob as same user
-    ansible.windows.win_powershell:
-      script: |
-        param ()
-
-        $ErrorActionPreference = 'Stop'
-
-        $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-        $blobPath = 'C:\temp\blob-user'
-        if (Test-Path -LiteralPath $blobPath) {
-            $blob = Get-Content -LiteralPath $blobPath -Raw
-            $Ansible.Changed = $false
-        }
-        else {
-            $blobBytes = . C:\temp\ConvertTo-DpapiNgBlob.ps1 -InputObject ([byte[]]@(0))
-            $blob = [System.Convert]::ToBase64String($blobBytes)
-            Set-Content -LiteralPath $blobPath -Value $blob
-        }
-
-        $blob
-        $user.Value
-    register: blob_same_user
-    become: true
-    become_method: runas
-    vars:
-      ansible_become_user: '{{ domain_user_upn }}'
-      ansible_become_pass: '{{ domain_password }}'
-
-  - name: create test blob as different user
-    ansible.windows.win_powershell:
-      parameters:
-        ProtectionDescriptor: SID={{ blob_same_user.output[1] }}
-      script: |
-        param ($ProtectionDescriptor)
-
-        $ErrorActionPreference = 'Stop'
-
-        $blobPath = 'C:\temp\blob-different'
-        if (Test-Path -LiteralPath $blobPath) {
-            $blob = Get-Content -LiteralPath $blobPath -Raw
-            $Ansible.Changed = $false
-        }
-        else {
-            $blobBytes = . C:\temp\ConvertTo-DpapiNgBlob.ps1 -InputObject ([byte[]]@(0)) -ProtectionDescriptor $ProtectionDescriptor
-            $blob = [System.Convert]::ToBase64String($blobBytes)
-            Set-Content -LiteralPath $blobPath -Value $blob
-        }
-
-        $blob
-    register: blob_different_user
-    become: true
-    become_method: runas
-    vars:
-      ansible_become_user: SYSTEM
 
 # Use the following to get a snaphot of programs installed and their product_ids
 # 'SOFTWARE', 'SOFTWARE\Wow6432Node' | ForEach-Object {
@@ -273,6 +234,7 @@
       - pip
       - install
       - dpapi-ng=={{ dpapi_ng_version }}
+      - pypsrp[kerberos]==1.0.0b1
       - pyspnego[kerberos]
       - pytest
       - pytest-asyncio
@@ -379,17 +341,6 @@
     become: false
     when: krb_provider == 'heimdal'
 
-  - name: create DPAPI-NG blob files
-    ansible.builtin.copy:
-      content: '{{ item.content }}'
-      dest: ~/{{ item.name }}
-    become: false
-    loop:
-    - content: '{{ hostvars["APP01"]["blob_same_user"]["output"][0] }}'
-      name: blob-user
-    - content: '{{ hostvars["APP01"]["blob_different_user"]["output"][0] }}'
-      name: blob-different
-
   - name: ensure wheel dir exists
     ansible.builtin.file:
       path: ~/wheels
@@ -425,6 +376,7 @@
     ansible.builtin.pip:
       name:
       - dpapi-ng=={{ dpapi_ng_version }}
+      - pypsrp[kerberos]==1.0.0b1
       - pyspnego[kerberos]
       - pytest
       - pytest-asyncio

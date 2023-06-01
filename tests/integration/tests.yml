@@ -1,8 +1,11 @@
-- name: run integration tests on Windows
+- name: setup Windows test files
   hosts: APP01
   gather_facts: false
   tags:
   - windows
+  - DH
+  - ECDH_P256
+  - ECDH_P384
 
   tasks:
   - name: template out tests
@@ -10,26 +13,14 @@
       src: test_integration.py
       dest: C:\temp\test_integration.py
 
-  - name: run integration tests as a normal user account
-    ansible.windows.win_command:
-      argv:
-      - C:\temp\venv\{{ item | win_basename }}\Scripts\python.exe
-      - -m
-      - pytest
-      - C:\temp\test_integration.py
-      - -v
-    with_items: '{{ python_interpreters }}'
-    become: yes
-    become_method: runas
-    vars:
-      ansible_become_user: '{{ domain_user_upn }}'
-      ansible_become_pass: '{{ domain_password }}'
-
-- name: run integration tests on Linux
+- name: setup Linux test files
   hosts: linux
   gather_facts: false
   tags:
   - linux
+  - DH
+  - ECDH_P256
+  - ECDH_P384
 
   tasks:
   - name: template out tests
@@ -48,13 +39,83 @@
     environment:
       KRB5CCNAME: /tmp/krb5.ccache
 
-  - name: run integration tests
-    ansible.builtin.command:
-      argv:
-      - ~/venv/dpapi-ng/bin/python
-      - -m
-      - pytest
-      - ~/test_integration.py
-      - -v
-    environment:
-      KRB5CCNAME: /tmp/krb5.ccache
+- name: setup DH root key
+  hosts: DC01
+  gather_facts: false
+  tags:
+  - windows
+  - linux
+  - DH
+
+  tasks:
+  - name: Add DH KDS root key
+    ansible.windows.win_powershell:
+      parameters:
+        KdfHashAlgorithm: SHA512
+        SecretAgreementAlgorithm: DH
+      script: '{{ lookup("file", "New-KdsRootKey.ps1") }}'
+      executable: pwsh
+    become: yes
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+- name: run DH integration tests
+  import_playbook: run_test.yml
+  tags:
+  - DH
+
+- name: setup ECDH_P256 root key
+  hosts: DC01
+  gather_facts: false
+  tags:
+  - windows
+  - linux
+  - ECDH_P256
+
+  tasks:
+  - name: Add ECDH_P256 KDS root key
+    ansible.windows.win_powershell:
+      parameters:
+        KdfHashAlgorithm: SHA512
+        SecretAgreementAlgorithm: ECDH_P256
+      script: '{{ lookup("file", "New-KdsRootKey.ps1") }}'
+      executable: pwsh
+    become: yes
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+- name: run ECDH_P256 integration tests
+  import_playbook: run_test.yml
+  tags:
+  - ECDH_P256
+
+- name: setup ECDH_P384 root key
+  hosts: DC01
+  gather_facts: false
+  tags:
+  - windows
+  - linux
+  - ECDH_P384
+
+  tasks:
+  - name: Add ECDH_P384 KDS root key
+    ansible.windows.win_powershell:
+      parameters:
+        KdfHashAlgorithm: SHA512
+        SecretAgreementAlgorithm: ECDH_P384
+      script: '{{ lookup("file", "New-KdsRootKey.ps1") }}'
+      executable: pwsh
+    become: yes
+    become_method: runas
+    vars:
+      ansible_become_user: '{{ domain_user_upn }}'
+      ansible_become_pass: '{{ domain_password }}'
+
+- name: run ECDH_P384 integration tests
+  import_playbook: run_test.yml
+  tags:
+  - ECDH_P384
