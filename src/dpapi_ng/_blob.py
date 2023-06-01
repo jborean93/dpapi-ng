@@ -7,7 +7,7 @@ import dataclasses
 import typing as t
 import uuid
 
-from ._asn1 import ASN1Reader
+from ._asn1 import ASN1Reader, ASN1Tag, ASN1Writer, TagClass, TypeTagNumber
 from ._pkcs7 import (
     ContentInfo,
     EnvelopedData,
@@ -123,6 +123,9 @@ class KeyIdentifier:
 
 @dataclasses.dataclass
 class DPAPINGBlob:
+    MICROSOFT_SOFTWARE_OID = "1.3.6.1.4.1.311.74.1"
+    MICROSOFT_SOFTWARE_SYSTEMS_OID = "1.3.6.1.4.1.311.74.1.1"
+
     """DPAPI NG Blob.
 
     The unpacked DPAPI NG blob that contains the information needed to decrypt
@@ -150,6 +153,76 @@ class DPAPINGBlob:
     enc_content_algorithm: str
     enc_content_parameters: t.Optional[bytes]
 
+    def pack(
+        self,
+        protection_descriptor: str,
+        blob_in_envelope: bool = True,
+    ) -> bytes:
+        """
+        Args:
+            protection_descriptor: The protection descriptor to embed in the EnvelopedData structure.
+            blob_in_envelope: True to store the encrypted blob in the EnvelopedData structure (NCryptProtectSecret general),
+                False to append the encrypted blob after the EnvelopedData structure (LAPS style).
+
+        Returns:
+            bytes: The DPAPI NG Blob data.
+        """
+        # TODO: it's not very nice to pass protection_descriptor as separate parameter here, should be extracted from self.security_descriptor
+        writer = ASN1Writer()
+        with writer.push_sequence() as ContentInfo:
+            ContentInfo.write_object_identifier(EnvelopedData.CONTENT_TYPE_ENVELOPED_DATA_OID)
+            with ContentInfo.push_sequence(
+                ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=0, is_constructed=True)
+            ) as Content:
+                with Content.push_sequence() as enveloped_data:
+                    enveloped_data.write_integer(2)  # EnvelopedData CMSVersion
+                    with enveloped_data.push_set() as recipient_infos:
+                        with recipient_infos.push_sequence(
+                            ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=2, is_constructed=True)
+                        ) as recipient_info:
+                            recipient_info.write_integer(4)  # KEKRecipientInfo CMSVersion
+                            with recipient_info.push_sequence() as key_agree_recipient_info:
+                                key_agree_recipient_info.write_octet_string(self.key_identifier.pack())
+                                with key_agree_recipient_info.push_sequence() as originator:
+                                    originator.write_object_identifier(DPAPINGBlob.MICROSOFT_SOFTWARE_OID)
+                                    with originator.push_sequence() as originator_sequence:
+                                        originator_sequence.write_object_identifier(
+                                            DPAPINGBlob.MICROSOFT_SOFTWARE_SYSTEMS_OID
+                                        )
+                                        with originator_sequence.push_sequence() as originator_sequence_2:
+                                            with originator_sequence_2.push_sequence() as originator_sequence_3:
+                                                with originator_sequence_3.push_sequence() as originator_sequence_4:
+                                                    originator_sequence_4.write_octet_string(
+                                                        b"SID", ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING)
+                                                    )
+                                                    originator_sequence_4.write_octet_string(
+                                                        protection_descriptor.encode("utf-8"),
+                                                        ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING),
+                                                    )
+                            with recipient_info.push_sequence() as kek_recipient_info:
+                                kek_recipient_info.write_object_identifier(self.enc_cek_algorithm)
+                            recipient_info.write_octet_string(self.enc_cek)
+                    with enveloped_data.push_sequence() as encrypted_content_info:
+                        encrypted_content_info.write_object_identifier(EnvelopedData.CONTENT_TYPE_DATA_OID)
+                        with encrypted_content_info.push_sequence() as content_encryption_algorithm_identifier:
+                            content_encryption_algorithm_identifier.write_object_identifier(self.enc_content_algorithm)
+                            if self.enc_content_parameters:
+                                content_encryption_algorithm_identifier._data.extend(self.enc_content_parameters)
+                            else:
+                                content_encryption_algorithm_identifier._data.extend(b"")
+                        if blob_in_envelope:
+                            encrypted_content_info.write_octet_string(
+                                self.enc_content,
+                                tag=ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=0, is_constructed=False),
+                            )
+
+        return b"".join(
+            [
+                writer.get_data(),
+                self.enc_content if not blob_in_envelope else b"",
+            ]
+        )
+
     @classmethod
     def unpack(
         cls,
@@ -160,7 +233,7 @@ class DPAPINGBlob:
         content_info = ContentInfo.unpack(view[: header.tag_length + header.length], header=header)
         remaining_data = view[header.tag_length + header.length :]
 
-        if content_info.content_type != EnvelopedData.content_type:
+        if content_info.content_type != EnvelopedData.CONTENT_TYPE_ENVELOPED_DATA_OID:
             raise ValueError(f"DPAPI-NG blob content type '{content_info.content_type}' is unsupported")
         enveloped_data = EnvelopedData.unpack(content_info.content)
 
@@ -175,11 +248,14 @@ class DPAPINGBlob:
         kek_info = enveloped_data.recipient_infos[0]
         key_identifier = KeyIdentifier.unpack(kek_info.kekid.key_identifier)
 
-        if not kek_info.kekid.other or kek_info.kekid.other.key_attr_id != "1.3.6.1.4.1.311.74.1":
+        if not kek_info.kekid.other or kek_info.kekid.other.key_attr_id != DPAPINGBlob.MICROSOFT_SOFTWARE_OID:
             raise ValueError("DPAPI-NG KEK Id is not in the expected format")
 
         protection_descriptor = NCryptProtectionDescriptor.unpack(kek_info.kekid.other.key_attr or b"")
-        if protection_descriptor.content_type != "1.3.6.1.4.1.311.74.1.1" or protection_descriptor.type != "SID":
+        if (
+            protection_descriptor.content_type != DPAPINGBlob.MICROSOFT_SOFTWARE_SYSTEMS_OID
+            or protection_descriptor.type != "SID"
+        ):
             raise ValueError(f"DPAPI-NG protection descriptor type '{protection_descriptor.type}' is unsupported")
 
         # Build the target security descriptor from the SID passed in. This SD

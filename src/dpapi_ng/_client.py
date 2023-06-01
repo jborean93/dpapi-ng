@@ -3,11 +3,20 @@
 
 from __future__ import annotations
 
+import time
 import typing as t
 import uuid
 
+from ._asn1 import ASN1Writer
 from ._blob import DPAPINGBlob
-from ._crypto import cek_decrypt, content_decrypt
+from ._crypto import (
+    AlgorithmOID,
+    cek_decrypt,
+    cek_encrypt,
+    cek_generate,
+    content_decrypt,
+    content_encrypt,
+)
 from ._dns import async_lookup_dc, lookup_dc
 from ._epm import EPM, EptMap, EptMapResult, TCPFloor, build_tcpip_tower
 from ._gkdi import (
@@ -17,6 +26,7 @@ from ._gkdi import (
     GroupKeyEnvelope,
     KDFParameters,
     compute_l1_key,
+    compute_l2_key,
 )
 from ._rpc import (
     NDR,
@@ -32,6 +42,9 @@ from ._rpc import (
     bind_time_feature_negotiation,
     create_rpc_connection,
 )
+from ._security_descriptor import ace_to_bytes, sd_to_bytes
+
+_EPOCH_FILETIME = 116444736000000000  # 1970-01-01 as FILETIME
 
 _EPM_CONTEXTS = [
     ContextElement(
@@ -223,6 +236,106 @@ def _decrypt_blob(
         blob.enc_content_parameters,
         cek,
         blob.enc_content,
+    )
+
+
+def _encrypt_blob(
+    blob: bytes,
+    key: GroupKeyEnvelope,
+    security_descriptor: bytes,
+    protection_descriptor: str,
+) -> bytes:
+    # Generate cek and encrypt our payload.
+    enc_cek_algorithm = AlgorithmOID.AES256_WRAP
+    cek, cek_iv = cek_generate(enc_cek_algorithm)
+
+    parameters_writer = ASN1Writer()
+    with parameters_writer.push_sequence() as parameters:
+        parameters.write_octet_string(cek_iv)
+        parameters.write_integer(16)
+
+    enc_content_algorithm = AlgorithmOID.AES256_GCM
+    enc_content_parameters = parameters_writer.get_data()
+    enc_content = content_encrypt(
+        enc_content_algorithm,
+        enc_content_parameters,
+        cek,
+        blob,
+    )
+
+    kek, key_identifier = key.new_kek()
+    enc_cek_parameters = None
+    enc_cek = cek_encrypt(
+        enc_cek_algorithm,
+        enc_cek_parameters,
+        kek,
+        cek,
+    )
+
+    return DPAPINGBlob(
+        key_identifier=key_identifier,
+        security_descriptor=security_descriptor,
+        enc_cek=enc_cek,
+        enc_cek_algorithm=enc_cek_algorithm,
+        enc_cek_parameters=enc_cek_parameters,
+        enc_content=enc_content,
+        enc_content_algorithm=enc_content_algorithm,
+        enc_content_parameters=enc_content_parameters,
+    ).pack(protection_descriptor)
+
+
+def _get_protection_gke_from_cache(
+    root_key_identifier: t.Optional[uuid.UUID],
+    target_sd: bytes,
+    cache: KeyCache,
+) -> t.Optional[GroupKeyEnvelope]:
+    if not root_key_identifier:
+        return None
+
+    # MS-GKDI 3.1.4.1 GetKey rules on how to generate the group key identifier
+    # values from the current time
+    # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gkdi/4cac87a3-521e-4918-a272-240f8fabed39
+    current_time = (time.time_ns() // 100) + _EPOCH_FILETIME
+    base = 360000000000  # 3.6 * 10**11
+    l0 = int(current_time / (32 * 32 * base))
+    l1 = int((current_time % (32 * 32 * base)) / (32 * base))
+    l2 = int((current_time % (32 * base)) / base)
+
+    rk = cache._get_key(
+        target_sd,
+        root_key_identifier,
+        l0,
+        l1,
+        l2,
+    )
+    if not rk:
+        return None
+
+    kdf_parameters = KDFParameters.unpack(rk.kdf_parameters)
+    l2_key = compute_l2_key(
+        kdf_parameters.hash_algorithm,
+        l1,
+        l2,
+        rk,
+    )
+
+    return GroupKeyEnvelope(
+        version=rk.version,
+        flags=rk.flags,
+        l0=l0,
+        l1=l1,
+        l2=l2,
+        root_key_identifier=root_key_identifier,
+        kdf_algorithm=rk.kdf_algorithm,
+        kdf_parameters=rk.kdf_parameters,
+        secret_algorithm=rk.secret_algorithm,
+        secret_parameters=rk.secret_parameters,
+        private_key_length=rk.private_key_length,
+        public_key_length=rk.public_key_length,
+        domain_name=rk.domain_name,
+        forest_name=rk.forest_name,
+        l1_key=b"",
+        l2_key=l2_key,
     )
 
 
@@ -487,6 +600,7 @@ def ncrypt_unprotect_secret(
         blob.key_identifier.l1,
         blob.key_identifier.l2,
     )
+
     if not rk:
         if not server:
             srv = lookup_dc(blob.key_identifier.domain_name)
@@ -504,9 +618,103 @@ def ncrypt_unprotect_secret(
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(blob.security_descriptor, rk)
+    if not rk.is_public_key:
+        cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
+
+
+def ncrypt_protect_secret(
+    data: bytes,
+    protection_descriptor: str,
+    root_key_identifier: t.Optional[uuid.UUID] = None,
+    server: t.Optional[str] = None,
+    domain_name: t.Optional[str] = None,
+    username: t.Optional[str] = None,
+    password: t.Optional[str] = None,
+    auth_protocol: str = "negotiate",
+    cache: t.Optional[KeyCache] = None,
+) -> bytes:
+    """Encrypt DPAPI-NG Blob.
+
+    Encrypts the blob provided as DPAPI-NG Blob. This is meant to
+    replicate the Win32 API `NCryptProtectSecret`_. While NCryptProtectSecret
+    supports multiple protection descriptor values, currently only the SID type
+    is supported.
+
+    Encrypting the DPAPI-NG blob requires making an RPC call to the domain
+    controller for the domain the blob was created in. It will attempt this
+    by looking up the DC through an SRV lookup but ``server`` can be specified
+    to avoid this SRV lookup.
+
+    The RPC call requires the caller to authenticate before the key information
+    is provided. Explicit credentials can be specified, if none are then the
+    current Kerberos ticket retrieved by ``kinit`` will be used instead. Make
+    sure to install the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure
+    Kerberos auth can be used.
+
+    Args:
+        data: The bytes blob to encrypt.
+        protection_descriptor: The security identifier to protect the secret
+            with.
+        root_key_identifier: Use the root key identified by this id, if not set,
+            the root key id returned by the server will be used.
+        server: The domain controller to lookup the root key info.
+        domain_name: The domain name to query the domain controller hostname
+            via DNS.
+        username: The username to encrypt the DPAPI-NG blob as.
+        password: The password for the user.
+        auth_protocol: The authentication protocol to use, defaults to
+            ``negotiate`` but can be ``kerberos`` or ``ntlm``.
+        cache: Optional cache that is used as the key source to avoid making
+            the RPC call. This only works if root_key_identifier is also
+            specified.
+
+    Returns:
+        bytes: The encrypted DPAPI-NG data.
+
+    Raises:
+        ValueError: An invalid data structure was found.
+        NotImplementedError: An unknown value was found and has not been
+            implemented yet.
+
+    _NCryptProtectSecret:
+        https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
+    """
+    l0 = -1
+    l1 = -1
+    l2 = -1
+
+    sd = sd_to_bytes(
+        owner="S-1-5-18",
+        group="S-1-5-18",
+        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
+    )
+
+    cache = cache or KeyCache()
+    rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
+
+    if not rk:
+        if not server:
+            srv = lookup_dc(domain_name)
+            server = srv.target
+
+        rk = _sync_get_key(
+            server,
+            sd,
+            root_key_identifier,
+            l0,
+            l1,
+            l2,
+            username=username,
+            password=password,
+            auth_protocol=auth_protocol,
+        )
+
+    if not rk.is_public_key:
+        cache._store_key(sd, rk)
+
+    return _encrypt_blob(data, rk, sd, protection_descriptor)
 
 
 async def async_ncrypt_unprotect_secret(
@@ -582,6 +790,100 @@ async def async_ncrypt_unprotect_secret(
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(blob.security_descriptor, rk)
+    if not rk.is_public_key:
+        cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
+
+
+async def async_ncrypt_protect_secret(
+    data: bytes,
+    protection_descriptor: str,
+    root_key_identifier: t.Optional[uuid.UUID] = None,
+    server: t.Optional[str] = None,
+    domain_name: t.Optional[str] = None,
+    username: t.Optional[str] = None,
+    password: t.Optional[str] = None,
+    auth_protocol: str = "negotiate",
+    cache: t.Optional[KeyCache] = None,
+) -> bytes:
+    """Encrypt DPAPI-NG Blob.
+
+    Encrypts the blob provided as DPAPI-NG Blob. This is meant to
+    replicate the Win32 API `NCryptProtectSecret`_. While NCryptProtectSecret
+    supports multiple protection descriptor values, currently only the SID type
+    is supported.
+
+    Encrypting the DPAPI-NG blob requires making an RPC call to the domain
+    controller for the domain the blob was created in. It will attempt this
+    by looking up the DC through an SRV lookup but ``server`` can be specified
+    to avoid this SRV lookup.
+
+    The RPC call requires the caller to authenticate before the key information
+    is provided. Explicit credentials can be specified, if none are then the
+    current Kerberos ticket retrieved by ``kinit`` will be used instead. Make
+    sure to install the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure
+    Kerberos auth can be used.
+
+    Args:
+        data: The bytes blob to encrypt.
+        protection_descriptor: The security identifier to protect the secret
+            with.
+        root_key_identifier: Use the root key identified by this id, if not set,
+            the root key id returned by the server will be used.
+        server: The domain controller to lookup the root key info.
+        domain_name: The domain name to query the domain controller hostname
+            via DNS.
+        username: The username to encrypt the DPAPI-NG blob as.
+        password: The password for the user.
+        auth_protocol: The authentication protocol to use, defaults to
+            ``negotiate`` but can be ``kerberos`` or ``ntlm``.
+        cache: Optional cache that is used as the key source to avoid making
+            the RPC call. This only works if root_key_identifier is also
+            specified.
+
+    Returns:
+        bytes: The encrypted DPAPI-NG data.
+
+    Raises:
+        ValueError: An invalid data structure was found.
+        NotImplementedError: An unknown value was found and has not been
+            implemented yet.
+
+    _NCryptProtectSecret:
+        https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
+    """
+    l0 = -1
+    l1 = -1
+    l2 = -1
+
+    sd = sd_to_bytes(
+        owner="S-1-5-18",
+        group="S-1-5-18",
+        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
+    )
+
+    cache = cache or KeyCache()
+    rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
+
+    if not rk:
+        if not server:
+            srv = await async_lookup_dc(domain_name)
+            server = srv.target
+
+        rk = await _async_get_key(
+            server,
+            sd,
+            root_key_identifier,
+            l0,
+            l1,
+            l2,
+            username=username,
+            password=password,
+            auth_protocol=auth_protocol,
+        )
+
+    if not rk.is_public_key:
+        cache._store_key(sd, rk)
+
+    return _encrypt_blob(data, rk, sd, protection_descriptor)

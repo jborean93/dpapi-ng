@@ -36,12 +36,13 @@ def _get_highest_answer(
 
 
 async def async_lookup_dc(
-    domain_name: str,
+    domain_name: t.Optional[str] = None,
 ) -> SrvRecord:
     """Lookup DC for domain name
 
-    Attempts to lookup LDAP server based on the domain name specified. This is
-    done through an SRV lookup for '_ldap._tcp.dc._msdcs.{domain_name}'.
+    Attempts to lookup LDAP server based on the domain name specified or the
+    system's search domain if available. This is done through an SRV lookup for
+    '_ldap._tcp.dc._msdcs.{domain_name}'.
 
     Args:
         domain_name: The domain to lookup the DC for.
@@ -53,19 +54,23 @@ async def async_lookup_dc(
         dns.exception.DNSException: DNS lookup error.
     """
 
-    record = f"_ldap._tcp.dc._msdcs.{domain_name}"
+    if domain_name:
+        record = f"_ldap._tcp.dc._msdcs.{domain_name}"
+    else:
+        record = f"_ldap._tcp.dc._msdcs"
 
-    answers = await dns.asyncresolver.resolve(record, "SRV")
+    answers = await dns.asyncresolver.resolve(record, "SRV", search=True)
     return _get_highest_answer(answers)
 
 
 def lookup_dc(
-    domain_name: str,
+    domain_name: t.Optional[str] = None,
 ) -> SrvRecord:
     """Lookup DC for domain name
 
-    Attempts to lookup LDAP server based on the domain name specified. This is
-    done through an SRV lookup for '_ldap._tcp.dc._msdcs.{domain_name}'.
+    Attempts to lookup LDAP server based on the domain name specified or the
+    system's search domain if available. This is done through an SRV lookup for
+    '_ldap._tcp.dc._msdcs.{domain_name}'.
 
     Args:
         domain_name: The domain to lookup the DC for.
@@ -77,7 +82,10 @@ def lookup_dc(
         dns.exception.DNSException: DNS lookup error.
     """
 
-    record = f"_ldap._tcp.dc._msdcs.{domain_name}"
+    if domain_name:
+        record = f"_ldap._tcp.dc._msdcs.{domain_name}"
+    else:
+        record = f"_ldap._tcp.dc._msdcs"
 
-    answers = dns.resolver.resolve(record, "SRV")
+    answers = dns.resolver.resolve(record, "SRV", search=True)
     return _get_highest_answer(answers)

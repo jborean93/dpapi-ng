@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+import os
 import typing as t
 import uuid
 
@@ -217,8 +218,8 @@ class FFCDHParameters:
     generator: int
 
     def pack(self) -> bytes:
-        b_field_order = self.field_order.to_bytes((self.field_order.bit_length() + 7) // 8, byteorder="big")
-        b_generator = self.generator.to_bytes((self.generator.bit_length() + 7) // 8, byteorder="big")
+        b_field_order = self.field_order.to_bytes(self.key_length, byteorder="big")
+        b_generator = self.generator.to_bytes(self.key_length, byteorder="big")
 
         return b"".join(
             [
@@ -276,9 +277,9 @@ class FFCDHKey:
     public_key: int
 
     def pack(self) -> bytes:
-        b_field_order = self.field_order.to_bytes((self.field_order.bit_length() + 7) // 8, byteorder="big")
-        b_generator = self.generator.to_bytes((self.generator.bit_length() + 7) // 8, byteorder="big")
-        b_pub_key = self.public_key.to_bytes((self.public_key.bit_length() + 7) // 8, byteorder="big")
+        b_field_order = self.field_order.to_bytes(self.key_length, byteorder="big")
+        b_generator = self.generator.to_bytes(self.key_length, byteorder="big")
+        b_pub_key = self.public_key.to_bytes(self.key_length, byteorder="big")
 
         return b"".join(
             [
@@ -351,8 +352,9 @@ class ECDHKey:
         }[self.curve_name]
 
     def pack(self) -> bytes:
-        b_x = self.x.to_bytes((self.x.bit_length() + 7) // 8, byteorder="big")
-        b_y = self.y.to_bytes((self.y.bit_length() + 7) // 8, byteorder="big")
+        b_x = self.x.to_bytes(self.key_length, byteorder="big")
+        b_y = self.y.to_bytes(self.key_length, byteorder="big")
+
         b_curve = {
             "P256": b"\x45\x43\x4B\x31",
             "P384": b"\x45\x43\x4B\x33",
@@ -505,7 +507,7 @@ class GroupKeyEnvelope:
 
         kdf_parameters = KDFParameters.unpack(self.kdf_parameters)
         hash_algo = kdf_parameters.hash_algorithm
-        l2_key = compute_l2_key(hash_algo, key_id, self)
+        l2_key = compute_l2_key(hash_algo, key_id.l1, key_id.l2, self)
 
         if key_id.is_public_key:
             return compute_kek_from_public_key(
@@ -525,6 +527,55 @@ class GroupKeyEnvelope:
                 key_id.key_info,
                 32,
             )
+
+    def new_kek(
+        self,
+    ) -> tuple[bytes, KeyIdentifier]:
+        if self.kdf_algorithm != "SP800_108_CTR_HMAC":
+            raise NotImplementedError(f"Unknown KDF algorithm '{self.kdf_algorithm}'")
+
+        kdf_parameters = KDFParameters.unpack(self.kdf_parameters)
+        hash_algo = kdf_parameters.hash_algorithm
+
+        if self.is_public_key:
+            # If is_public_key flag is set, the L2 key is the peer's public key
+            private_key = os.urandom(math.ceil(self.private_key_length / 8))
+            kek = compute_kek(
+                algorithm=hash_algo,
+                secret_algorithm=self.secret_algorithm,
+                secret_parameters=self.secret_parameters,
+                private_key=private_key,
+                public_key=self.l2_key,
+            )
+
+            key_info = compute_public_key(
+                secret_algorithm=self.secret_algorithm,
+                secret_parameters=self.secret_parameters,
+                private_key=private_key,
+                peer_public_key=self.l2_key,
+            )
+        else:
+            key_info = os.urandom(32)
+            kek = kdf(
+                hash_algo,
+                self.l2_key,
+                KDS_SERVICE_LABEL,
+                key_info,
+                32,
+            )
+
+        key_identifier = KeyIdentifier(
+            version=1,
+            flags=self.flags,
+            l0=self.l0,
+            l1=self.l1,
+            l2=self.l2,
+            root_key_identifier=self.root_key_identifier,
+            key_info=key_info,
+            domain_name=self.domain_name,
+            forest_name=self.forest_name,
+        )
+        return kek, key_identifier
 
     @classmethod
     def unpack(
@@ -640,14 +691,15 @@ def compute_l1_key(
 
 def compute_l2_key(
     algorithm: hashes.HashAlgorithm,
-    request: KeyIdentifier,
+    request_l1: int,
+    request_l2: int,
     rk: GroupKeyEnvelope,
 ) -> bytes:
     l1 = rk.l1
     l1_key = rk.l1_key
     l2 = rk.l2
     l2_key = rk.l2_key
-    reseed_l2 = l2 == 31 or rk.l1 != request.l1
+    reseed_l2 = l2 == 31 or rk.l1 != request_l1
 
     # MS-GKDI 2.2.4 Group key Envelope
     # If the value in the L2 index field is equal to 31, this contains the
@@ -655,10 +707,10 @@ def compute_l2_key(
     # other cases, this field contains the L1 key with group key identifier
     # (L0 index, L1 index - 1, -1). If this field is present, its length
     # MUST be equal to 64 bytes.
-    if l2 != 31 and l1 != request.l1:
+    if l2 != 31 and l1 != request_l1:
         l1 -= 1
 
-    while l1 != request.l1:
+    while l1 != request_l1:
         reseed_l2 = True
         l1 -= 1
 
@@ -690,7 +742,7 @@ def compute_l2_key(
             64,
         )
 
-    while l2 != request.l2:
+    while l2 != request_l2:
         l2 -= 1
 
         l2_key = kdf(
@@ -733,10 +785,6 @@ def compute_kek_from_public_key(
     public_key: bytes,
     private_key_length: int,
 ) -> bytes:
-    # Special thanks for Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski
-    # for providing access to CQDPAPINGPFXDecrypter.exe which contains the
-    # BCrypt* APIs Microsoft use to derive the KEK.
-
     private_key = kdf(
         algorithm,
         seed,
@@ -744,6 +792,26 @@ def compute_kek_from_public_key(
         (secret_algorithm + "\0").encode("utf-16-le"),
         private_key_length,
     )
+
+    return compute_kek(
+        algorithm,
+        secret_algorithm=secret_algorithm,
+        secret_parameters=secret_parameters,
+        private_key=private_key,
+        public_key=public_key,
+    )
+
+
+def compute_kek(
+    algorithm: hashes.HashAlgorithm,
+    secret_algorithm: str,
+    secret_parameters: t.Optional[bytes],
+    private_key: bytes,
+    public_key: bytes,
+) -> bytes:
+    # Special thanks for Grzegorz Tworek (@0gtweet) and Michał Grzegorzewski
+    # for providing access to CQDPAPINGPFXDecrypter.exe which contains the
+    # BCrypt* APIs Microsoft use to derive the KEK.
 
     secret_hash_algorithm: hashes.HashAlgorithm
     if secret_algorithm == "DH":
@@ -756,7 +824,7 @@ def compute_kek_from_public_key(
             int.from_bytes(private_key, byteorder="big"),
             dh_pub_key.field_order,
         )
-        shared_secret = shared_secret_int.to_bytes((shared_secret_int.bit_length() + 7) // 8, byteorder="big")
+        shared_secret = shared_secret_int.to_bytes(dh_pub_key.key_length, byteorder="big")
         secret_hash_algorithm = hashes.SHA256()
 
     elif secret_algorithm.startswith("ECDH_P"):
@@ -798,3 +866,47 @@ def compute_kek_from_public_key(
         kek_context,
         32,
     )
+
+
+def compute_public_key(
+    secret_algorithm: str,
+    secret_parameters: t.Optional[bytes],
+    private_key: bytes,
+    peer_public_key: bytes,
+) -> bytes:
+    if secret_algorithm == "DH":
+        dh_pub_key = FFCDHKey.unpack(peer_public_key)
+
+        # We can derive our public key based on the DH formula.
+        # X = G**x mod p
+        my_pub_key = pow(
+            dh_pub_key.generator,
+            int.from_bytes(private_key, byteorder="big"),
+            dh_pub_key.field_order,
+        )
+        return FFCDHKey(
+            dh_pub_key.key_length,
+            dh_pub_key.field_order,
+            dh_pub_key.generator,
+            my_pub_key,
+        ).pack()
+
+    elif secret_algorithm.startswith("ECDH_P"):
+        ecdh_pub_key = ECDHKey.unpack(peer_public_key)
+        curve = ecdh_pub_key.curve_and_hash[0]
+
+        ecdh_private = ec.derive_private_key(
+            int.from_bytes(private_key, byteorder="big"),
+            curve,
+        )
+        my_ecdh_pub_key = ecdh_private.public_key().public_numbers()
+
+        return ECDHKey(
+            ecdh_pub_key.curve_name,
+            ecdh_pub_key.key_length,
+            my_ecdh_pub_key.x,
+            my_ecdh_pub_key.y,
+        ).pack()
+
+    else:
+        raise NotImplementedError(f"Unknown secret agreement algorithm '{secret_algorithm}'")

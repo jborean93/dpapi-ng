@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import enum
+import os
 import typing as t
 
 from cryptography.hazmat.primitives import hashes, keywrap
@@ -14,14 +16,46 @@ from cryptography.hazmat.primitives.kdf.kbkdf import KBKDFHMAC, CounterLocation,
 from ._asn1 import ASN1Reader
 
 
+class AlgorithmOID(str, enum.Enum):
+    """OIDs for cryptographic algorithms."""
+
+    AES256_WRAP = "2.16.840.1.101.3.4.1.45"
+    AES256_GCM = "2.16.840.1.101.3.4.1.46"
+
+
 def cek_decrypt(
     algorithm: str,
     parameters: t.Optional[bytes],
     kek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.45":  # AES256-wrap
+    if algorithm == AlgorithmOID.AES256_WRAP:
         return keywrap.aes_key_unwrap(kek, value)
+
+    else:
+        raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
+
+
+def cek_encrypt(
+    algorithm: str,
+    parameters: t.Optional[bytes],
+    kek: bytes,
+    value: bytes,
+) -> bytes:
+    if algorithm == AlgorithmOID.AES256_WRAP:
+        return keywrap.aes_key_wrap(kek, value)
+
+    else:
+        raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
+
+
+def cek_generate(
+    algorithm: str,
+) -> t.Tuple[bytes, bytes]:
+    if algorithm == AlgorithmOID.AES256_WRAP:
+        cek = AESGCM.generate_key(bit_length=256)
+        cek_iv = os.urandom(12)
+        return cek, cek_iv
 
     else:
         raise NotImplementedError(f"Unknown cek encryption algorithm OID '{algorithm}'")
@@ -33,7 +67,7 @@ def content_decrypt(
     cek: bytes,
     value: bytes,
 ) -> bytes:
-    if algorithm == "2.16.840.1.101.3.4.1.46":  # AES256-GCM
+    if algorithm == AlgorithmOID.AES256_GCM:
         if not parameters:
             raise ValueError("Expecting parameters for AES256 GCM decryption but received none.")
 
@@ -42,6 +76,26 @@ def content_decrypt(
 
         cipher = AESGCM(cek)
         return cipher.decrypt(iv, value, None)
+
+    else:
+        raise NotImplementedError(f"Unknown content encryption algorithm OID '{algorithm}'")
+
+
+def content_encrypt(
+    algorithm: str,
+    parameters: t.Optional[bytes],
+    cek: bytes,
+    value: bytes,
+) -> bytes:
+    if algorithm == AlgorithmOID.AES256_GCM:
+        if not parameters:
+            raise ValueError("Expecting parameters for AES256 GCM encryption but received none.")
+
+        reader = ASN1Reader(parameters).read_sequence()
+        iv = reader.read_octet_string()
+
+        cipher = AESGCM(cek)
+        return cipher.encrypt(iv, value, None)
 
     else:
         raise NotImplementedError(f"Unknown content encryption algorithm OID '{algorithm}'")
