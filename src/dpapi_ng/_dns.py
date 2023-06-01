@@ -40,8 +40,9 @@ async def async_lookup_dc(
 ) -> SrvRecord:
     """Lookup DC for domain name
 
-    Attempts to lookup LDAP server based on the domain name specified or the system's search domain if available.
-    This is done through an SRV lookup for '_ldap._tcp.dc._msdcs.{domain_name}'.
+    Attempts to lookup LDAP server based on the domain name specified or the
+    system's search domain if available. This is done through an SRV lookup for
+    '_ldap._tcp.dc._msdcs.{domain_name}'.
 
     Args:
         domain_name: The domain to lookup the DC for.
@@ -67,8 +68,9 @@ def lookup_dc(
 ) -> SrvRecord:
     """Lookup DC for domain name
 
-    Attempts to lookup LDAP server based on the domain name specified or the system's search domain if available.
-    This is done through an SRV lookup for '_ldap._tcp.dc._msdcs.{domain_name}'.
+    Attempts to lookup LDAP server based on the domain name specified or the
+    system's search domain if available. This is done through an SRV lookup for
+    '_ldap._tcp.dc._msdcs.{domain_name}'.
 
     Args:
         domain_name: The domain to lookup the DC for.

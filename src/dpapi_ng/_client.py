@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 import typing as t
 import uuid
 
@@ -25,6 +26,7 @@ from ._gkdi import (
     GroupKeyEnvelope,
     KDFParameters,
     compute_l1_key,
+    compute_l2_key,
 )
 from ._rpc import (
     NDR,
@@ -41,6 +43,8 @@ from ._rpc import (
     create_rpc_connection,
 )
 from ._security_descriptor import ace_to_bytes, sd_to_bytes
+
+_EPOCH_FILETIME = 116444736000000000  # 1970-01-01 as FILETIME
 
 _EPM_CONTEXTS = [
     ContextElement(
@@ -280,6 +284,61 @@ def _encrypt_blob(
     ).pack(protection_descriptor)
 
 
+def _get_protection_gke_from_cache(
+    root_key_identifier: t.Optional[uuid.UUID],
+    target_sd: bytes,
+    cache: KeyCache,
+) -> t.Optional[GroupKeyEnvelope]:
+    if not root_key_identifier:
+        return None
+
+    # MS-GKDI 3.1.4.1 GetKey rules on how to generate the group key identifier
+    # values from the current time
+    # https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gkdi/4cac87a3-521e-4918-a272-240f8fabed39
+    current_time = (time.time_ns() // 100) + _EPOCH_FILETIME
+    base = 360000000000  # 3.6 * 10**11
+    l0 = int(current_time / (32 * 32 * base))
+    l1 = int((current_time % (32 * 32 * base)) / (32 * base))
+    l2 = int((current_time % (32 * base)) / base)
+
+    rk = cache._get_key(
+        target_sd,
+        root_key_identifier,
+        l0,
+        l1,
+        l2,
+    )
+    if not rk:
+        return None
+
+    kdf_parameters = KDFParameters.unpack(rk.kdf_parameters)
+    l2_key = compute_l2_key(
+        kdf_parameters.hash_algorithm,
+        l1,
+        l2,
+        rk,
+    )
+
+    return GroupKeyEnvelope(
+        version=rk.version,
+        flags=rk.flags,
+        l0=l0,
+        l1=l1,
+        l2=l2,
+        root_key_identifier=root_key_identifier,
+        kdf_algorithm=rk.kdf_algorithm,
+        kdf_parameters=rk.kdf_parameters,
+        secret_algorithm=rk.secret_algorithm,
+        secret_parameters=rk.secret_parameters,
+        private_key_length=rk.private_key_length,
+        public_key_length=rk.public_key_length,
+        domain_name=rk.domain_name,
+        forest_name=rk.forest_name,
+        l1_key=b"",
+        l2_key=l2_key,
+    )
+
+
 class RootKey(t.NamedTuple):
     """The KDS Root Key."""
 
@@ -437,11 +496,7 @@ class KeyCache:
         Returns:
             Optional[GroupKeyEnvelope]: The cached key if one was available.
         """
-        l0_and_seed_key = self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {})
-        if l0_and_seed_key and l0 == -1 and l1 == -1 and l2 == -1:
-            for l0, seed_key1 in l0_and_seed_key.items():
-                return seed_key1
-        seed_key = l0_and_seed_key.get(l0, None)
+        seed_key = self._seed_keys.setdefault(root_key_id, {}).setdefault(target_sd, {}).get(l0, None)
         if seed_key and (seed_key.l1 > l1 or (seed_key.l1 == l1 and seed_key.l2 >= l2)):
             return seed_key
 
@@ -563,7 +618,8 @@ def ncrypt_unprotect_secret(
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(blob.security_descriptor, rk)
+    if not rk.is_public_key:
+        cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
 
@@ -582,7 +638,9 @@ def ncrypt_protect_secret(
     """Encrypt DPAPI-NG Blob.
 
     Encrypts the blob provided as DPAPI-NG Blob. This is meant to
-    replicate the Win32 API `NCryptProtectSecret`_.
+    replicate the Win32 API `NCryptProtectSecret`_. While NCryptProtectSecret
+    supports multiple protection descriptor values, currently only the SID type
+    is supported.
 
     Encrypting the DPAPI-NG blob requires making an RPC call to the domain
     controller for the domain the blob was created in. It will attempt this
@@ -590,22 +648,27 @@ def ncrypt_protect_secret(
     to avoid this SRV lookup.
 
     The RPC call requires the caller to authenticate before the key information
-    is provided. This user must be one who is authorized to encrypt the secret.
-    Explicit credentials can be specified, if none are the current Kerberos
-    ticket retrieved by ``kinit`` will be used instead. Make sure to install
-    the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure Kerberos auth
-    can be used.
+    is provided. Explicit credentials can be specified, if none are then the
+    current Kerberos ticket retrieved by ``kinit`` will be used instead. Make
+    sure to install the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure
+    Kerberos auth can be used.
 
     Args:
         data: The bytes blob to encrypt.
+        protection_descriptor: The security identifier to protect the secret
+            with.
+        root_key_identifier: Use the root key identified by this id, if not set,
+            the root key id returned by the server will be used.
         server: The domain controller to lookup the root key info.
-        domain_name: The domain name to query the domain controller hostname via DNS.
+        domain_name: The domain name to query the domain controller hostname
+            via DNS.
         username: The username to encrypt the DPAPI-NG blob as.
         password: The password for the user.
         auth_protocol: The authentication protocol to use, defaults to
             ``negotiate`` but can be ``kerberos`` or ``ntlm``.
         cache: Optional cache that is used as the key source to avoid making
-            the RPC call.
+            the RPC call. This only works if root_key_identifier is also
+            specified.
 
     Returns:
         bytes: The encrypted DPAPI-NG data.
@@ -618,9 +681,9 @@ def ncrypt_protect_secret(
     _NCryptProtectSecret:
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
     """
-    key_identifier_l0 = -1
-    key_identifier_l1 = -1
-    key_identifier_l2 = -1
+    l0 = -1
+    l1 = -1
+    l2 = -1
 
     sd = sd_to_bytes(
         owner="S-1-5-18",
@@ -629,16 +692,7 @@ def ncrypt_protect_secret(
     )
 
     cache = cache or KeyCache()
-    rk = None
-    if root_key_identifier:
-        non_null_root_key_identifier: uuid.UUID = root_key_identifier
-        rk = cache._get_key(
-            sd,
-            non_null_root_key_identifier,
-            key_identifier_l0,
-            key_identifier_l1,
-            key_identifier_l2,
-        )
+    rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
 
     if not rk:
         if not server:
@@ -649,15 +703,16 @@ def ncrypt_protect_secret(
             server,
             sd,
             root_key_identifier,
-            key_identifier_l0,
-            key_identifier_l1,
-            key_identifier_l2,
+            l0,
+            l1,
+            l2,
             username=username,
             password=password,
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(sd, rk)
+    if not rk.is_public_key:
+        cache._store_key(sd, rk)
 
     return _encrypt_blob(data, rk, sd, protection_descriptor)
 
@@ -735,7 +790,8 @@ async def async_ncrypt_unprotect_secret(
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(blob.security_descriptor, rk)
+    if not rk.is_public_key:
+        cache._store_key(blob.security_descriptor, rk)
 
     return _decrypt_blob(blob, rk)
 
@@ -754,7 +810,9 @@ async def async_ncrypt_protect_secret(
     """Encrypt DPAPI-NG Blob.
 
     Encrypts the blob provided as DPAPI-NG Blob. This is meant to
-    replicate the Win32 API `NCryptProtectSecret`_.
+    replicate the Win32 API `NCryptProtectSecret`_. While NCryptProtectSecret
+    supports multiple protection descriptor values, currently only the SID type
+    is supported.
 
     Encrypting the DPAPI-NG blob requires making an RPC call to the domain
     controller for the domain the blob was created in. It will attempt this
@@ -762,22 +820,27 @@ async def async_ncrypt_protect_secret(
     to avoid this SRV lookup.
 
     The RPC call requires the caller to authenticate before the key information
-    is provided. This user must be one who is authorized to encrypt the secret.
-    Explicit credentials can be specified, if none are the current Kerberos
-    ticket retrieved by ``kinit`` will be used instead. Make sure to install
-    the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure Kerberos auth
-    can be used.
+    is provided. Explicit credentials can be specified, if none are then the
+    current Kerberos ticket retrieved by ``kinit`` will be used instead. Make
+    sure to install the Kerberos extras package ``dpapi-ng[kerberos]`` to ensure
+    Kerberos auth can be used.
 
     Args:
         data: The bytes blob to encrypt.
+        protection_descriptor: The security identifier to protect the secret
+            with.
+        root_key_identifier: Use the root key identified by this id, if not set,
+            the root key id returned by the server will be used.
         server: The domain controller to lookup the root key info.
-        domain_name: The domain name to query the domain controller hostname via DNS.
+        domain_name: The domain name to query the domain controller hostname
+            via DNS.
         username: The username to encrypt the DPAPI-NG blob as.
         password: The password for the user.
         auth_protocol: The authentication protocol to use, defaults to
             ``negotiate`` but can be ``kerberos`` or ``ntlm``.
         cache: Optional cache that is used as the key source to avoid making
-            the RPC call.
+            the RPC call. This only works if root_key_identifier is also
+            specified.
 
     Returns:
         bytes: The encrypted DPAPI-NG data.
@@ -790,9 +853,9 @@ async def async_ncrypt_protect_secret(
     _NCryptProtectSecret:
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptprotectsecret
     """
-    key_identifier_l0 = -1
-    key_identifier_l1 = -1
-    key_identifier_l2 = -1
+    l0 = -1
+    l1 = -1
+    l2 = -1
 
     sd = sd_to_bytes(
         owner="S-1-5-18",
@@ -801,16 +864,7 @@ async def async_ncrypt_protect_secret(
     )
 
     cache = cache or KeyCache()
-    rk = None
-    if root_key_identifier:
-        non_null_root_key_identifier: uuid.UUID = root_key_identifier
-        rk = cache._get_key(
-            sd,
-            root_key_identifier,
-            key_identifier_l0,
-            key_identifier_l1,
-            key_identifier_l2,
-        )
+    rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
 
     if not rk:
         if not server:
@@ -821,14 +875,15 @@ async def async_ncrypt_protect_secret(
             server,
             sd,
             root_key_identifier,
-            key_identifier_l0,
-            key_identifier_l1,
-            key_identifier_l2,
+            l0,
+            l1,
+            l2,
             username=username,
             password=password,
             auth_protocol=auth_protocol,
         )
 
-    cache._store_key(sd, rk)
+    if not rk.is_public_key:
+        cache._store_key(sd, rk)
 
     return _encrypt_blob(data, rk, sd, protection_descriptor)

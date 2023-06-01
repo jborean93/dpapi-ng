@@ -218,8 +218,8 @@ class FFCDHParameters:
     generator: int
 
     def pack(self) -> bytes:
-        b_field_order = self.field_order.to_bytes((self.field_order.bit_length() + 7) // 8, byteorder="big")
-        b_generator = self.generator.to_bytes((self.generator.bit_length() + 7) // 8, byteorder="big")
+        b_field_order = self.field_order.to_bytes(self.key_length, byteorder="big")
+        b_generator = self.generator.to_bytes(self.key_length, byteorder="big")
 
         return b"".join(
             [
@@ -277,9 +277,9 @@ class FFCDHKey:
     public_key: int
 
     def pack(self) -> bytes:
-        b_field_order = self.field_order.to_bytes((self.field_order.bit_length() + 7) // 8, byteorder="big")
-        b_generator = self.generator.to_bytes((self.generator.bit_length() + 7) // 8, byteorder="big")
-        b_pub_key = self.public_key.to_bytes((self.public_key.bit_length() + 7) // 8, byteorder="big")
+        b_field_order = self.field_order.to_bytes(self.key_length, byteorder="big")
+        b_generator = self.generator.to_bytes(self.key_length, byteorder="big")
+        b_pub_key = self.public_key.to_bytes(self.key_length, byteorder="big")
 
         return b"".join(
             [
@@ -352,8 +352,9 @@ class ECDHKey:
         }[self.curve_name]
 
     def pack(self) -> bytes:
-        b_x = self.x.to_bytes((self.x.bit_length() + 7) // 8, byteorder="big")
-        b_y = self.y.to_bytes((self.y.bit_length() + 7) // 8, byteorder="big")
+        b_x = self.x.to_bytes(self.key_length, byteorder="big")
+        b_y = self.y.to_bytes(self.key_length, byteorder="big")
+
         b_curve = {
             "P256": b"\x45\x43\x4B\x31",
             "P384": b"\x45\x43\x4B\x33",
@@ -506,7 +507,7 @@ class GroupKeyEnvelope:
 
         kdf_parameters = KDFParameters.unpack(self.kdf_parameters)
         hash_algo = kdf_parameters.hash_algorithm
-        l2_key = compute_l2_key(hash_algo, key_id, self)
+        l2_key = compute_l2_key(hash_algo, key_id.l1, key_id.l2, self)
 
         if key_id.is_public_key:
             return compute_kek_from_public_key(
@@ -690,14 +691,15 @@ def compute_l1_key(
 
 def compute_l2_key(
     algorithm: hashes.HashAlgorithm,
-    request: KeyIdentifier,
+    request_l1: int,
+    request_l2: int,
     rk: GroupKeyEnvelope,
 ) -> bytes:
     l1 = rk.l1
     l1_key = rk.l1_key
     l2 = rk.l2
     l2_key = rk.l2_key
-    reseed_l2 = l2 == 31 or rk.l1 != request.l1
+    reseed_l2 = l2 == 31 or rk.l1 != request_l1
 
     # MS-GKDI 2.2.4 Group key Envelope
     # If the value in the L2 index field is equal to 31, this contains the
@@ -705,10 +707,10 @@ def compute_l2_key(
     # other cases, this field contains the L1 key with group key identifier
     # (L0 index, L1 index - 1, -1). If this field is present, its length
     # MUST be equal to 64 bytes.
-    if l2 != 31 and l1 != request.l1:
+    if l2 != 31 and l1 != request_l1:
         l1 -= 1
 
-    while l1 != request.l1:
+    while l1 != request_l1:
         reseed_l2 = True
         l1 -= 1
 
@@ -740,7 +742,7 @@ def compute_l2_key(
             64,
         )
 
-    while l2 != request.l2:
+    while l2 != request_l2:
         l2 -= 1
 
         l2_key = kdf(
@@ -822,7 +824,7 @@ def compute_kek(
             int.from_bytes(private_key, byteorder="big"),
             dh_pub_key.field_order,
         )
-        shared_secret = shared_secret_int.to_bytes((shared_secret_int.bit_length() + 7) // 8, byteorder="big")
+        shared_secret = shared_secret_int.to_bytes(dh_pub_key.key_length, byteorder="big")
         secret_hash_algorithm = hashes.SHA256()
 
     elif secret_algorithm.startswith("ECDH_P"):
@@ -890,20 +892,20 @@ def compute_public_key(
         ).pack()
 
     elif secret_algorithm.startswith("ECDH_P"):
-        ecdh_pub_key_info = ECDHKey.unpack(peer_public_key)
-        curve, secret_hash_algorithm = ecdh_pub_key_info.curve_and_hash
+        ecdh_pub_key = ECDHKey.unpack(peer_public_key)
+        curve = ecdh_pub_key.curve_and_hash[0]
 
-        ecdh_pub_key = ec.EllipticCurvePublicNumbers(ecdh_pub_key_info.x, ecdh_pub_key_info.y, curve).public_key()
         ecdh_private = ec.derive_private_key(
             int.from_bytes(private_key, byteorder="big"),
             curve,
         )
+        my_ecdh_pub_key = ecdh_private.public_key().public_numbers()
 
         return ECDHKey(
-            ecdh_pub_key_info.curve_name,
-            ecdh_pub_key_info.key_length,
-            ecdh_private.public_key().public_numbers().x,
-            ecdh_private.public_key().public_numbers().y,
+            ecdh_pub_key.curve_name,
+            ecdh_pub_key.key_length,
+            my_ecdh_pub_key.x,
+            my_ecdh_pub_key.y,
         ).pack()
 
     else:

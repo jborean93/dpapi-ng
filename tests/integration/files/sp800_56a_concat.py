@@ -140,7 +140,7 @@ if scenario == "DH":
         int.from_bytes(private_key, byteorder="big"),
         dh_pub_key.field_order,
     )
-    shared_secret = shared_secret_int.to_bytes((shared_secret_int.bit_length() + 7) // 8, byteorder="big")
+    shared_secret = shared_secret_int.to_bytes(dh_pub_key.key_length, byteorder="big")
     secret_hash_algorithm = hashes.SHA256()
 
 else:
