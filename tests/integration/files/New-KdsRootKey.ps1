@@ -38,6 +38,8 @@ if ($SecretAgreementAlgorithm -eq "DH") {
         $fieldOrder
         $generator
     )
+    $kdsParams.SecretAgreementPrivateKeyLength = 512
+    $kdsParams.SecretAgreementPublicKeyLength = 2048
 }
 else {
     # ECDH_P521 is also meant to work but I keep on getting errors setting it

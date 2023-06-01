@@ -49,5 +49,7 @@ all:
 
     domain_name: dpaping.test
     domain_username: vagrant-domain
+    domain_username2: vagrant-domain2
     domain_password: VagrantPass1
     domain_user_upn: '{{ domain_username }}@{{ domain_name | upper }}'
+    domain_user_upn2: '{{ domain_username2 }}@{{ domain_name | upper }}'

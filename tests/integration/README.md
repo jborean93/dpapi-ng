@@ -15,3 +15,12 @@ ansible-playbook main.yml -vv
 
 Before running `main.yml`, download the `artifact` zip from the GitHub Actions workflow to test.
 This zip should be placed in the same directory as the playbook as `artifact.zip`.
+
+The command to run the tests is:
+
+```bash
+ansible-playbook tests.yml -vv
+```
+
+The tests will run for the root key algorithms `DH`, `ECDH_P256`, and `ECDH_P384`.
+To run the tests for just one algorithm add `--tags <algorithm>` like `--tags DH`.
