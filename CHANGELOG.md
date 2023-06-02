@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 - TBD
+## 0.2.0 - 2023-06-02
 
 + Added functions to encrypt data using DPAPI-NG:
     + `async_ncrypt_protect_secret`
