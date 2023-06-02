@@ -8,7 +8,7 @@ import typing as t
 import uuid
 
 from ._asn1 import ASN1Writer
-from ._blob import DPAPINGBlob
+from ._blob import DPAPINGBlob, ProtectionDescriptor
 from ._crypto import (
     AlgorithmOID,
     cek_decrypt,
@@ -42,7 +42,6 @@ from ._rpc import (
     bind_time_feature_negotiation,
     create_rpc_connection,
 )
-from ._security_descriptor import ace_to_bytes, sd_to_bytes
 
 _EPOCH_FILETIME = 116444736000000000  # 1970-01-01 as FILETIME
 
@@ -242,8 +241,7 @@ def _decrypt_blob(
 def _encrypt_blob(
     blob: bytes,
     key: GroupKeyEnvelope,
-    security_descriptor: bytes,
-    protection_descriptor: str,
+    protection_descriptor: ProtectionDescriptor,
 ) -> bytes:
     # Generate cek and encrypt our payload.
     enc_cek_algorithm = AlgorithmOID.AES256_WRAP
@@ -274,14 +272,14 @@ def _encrypt_blob(
 
     return DPAPINGBlob(
         key_identifier=key_identifier,
-        security_descriptor=security_descriptor,
+        protection_descriptor=protection_descriptor,
         enc_cek=enc_cek,
         enc_cek_algorithm=enc_cek_algorithm,
         enc_cek_parameters=enc_cek_parameters,
         enc_content=enc_content,
         enc_content_algorithm=enc_content_algorithm,
         enc_content_parameters=enc_content_parameters,
-    ).pack(protection_descriptor)
+    ).pack()
 
 
 def _get_protection_gke_from_cache(
@@ -591,10 +589,11 @@ def ncrypt_unprotect_secret(
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptunprotectsecret
     """
     blob = DPAPINGBlob.unpack(data)
+    target_sd = blob.protection_descriptor.get_target_sd()
 
     cache = cache or KeyCache()
     rk = cache._get_key(
-        blob.security_descriptor,
+        target_sd,
         blob.key_identifier.root_key_identifier,
         blob.key_identifier.l0,
         blob.key_identifier.l1,
@@ -608,7 +607,7 @@ def ncrypt_unprotect_secret(
 
         rk = _sync_get_key(
             server,
-            blob.security_descriptor,
+            target_sd,
             blob.key_identifier.root_key_identifier,
             blob.key_identifier.l0,
             blob.key_identifier.l1,
@@ -619,7 +618,7 @@ def ncrypt_unprotect_secret(
         )
 
     if not rk.is_public_key:
-        cache._store_key(blob.security_descriptor, rk)
+        cache._store_key(target_sd, rk)
 
     return _decrypt_blob(blob, rk)
 
@@ -685,11 +684,8 @@ def ncrypt_protect_secret(
     l1 = -1
     l2 = -1
 
-    sd = sd_to_bytes(
-        owner="S-1-5-18",
-        group="S-1-5-18",
-        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
-    )
+    descriptor = ProtectionDescriptor.parse(protection_descriptor)
+    sd = descriptor.get_target_sd()
 
     cache = cache or KeyCache()
     rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
@@ -714,7 +710,7 @@ def ncrypt_protect_secret(
     if not rk.is_public_key:
         cache._store_key(sd, rk)
 
-    return _encrypt_blob(data, rk, sd, protection_descriptor)
+    return _encrypt_blob(data, rk, descriptor)
 
 
 async def async_ncrypt_unprotect_secret(
@@ -764,10 +760,11 @@ async def async_ncrypt_unprotect_secret(
         https://learn.microsoft.com/en-us/windows/win32/api/ncryptprotect/nf-ncryptprotect-ncryptunprotectsecret
     """
     blob = DPAPINGBlob.unpack(data)
+    target_sd = blob.protection_descriptor.get_target_sd()
 
     cache = cache or KeyCache()
     rk = cache._get_key(
-        blob.security_descriptor,
+        target_sd,
         blob.key_identifier.root_key_identifier,
         blob.key_identifier.l0,
         blob.key_identifier.l1,
@@ -780,7 +777,7 @@ async def async_ncrypt_unprotect_secret(
 
         rk = await _async_get_key(
             server,
-            blob.security_descriptor,
+            target_sd,
             blob.key_identifier.root_key_identifier,
             blob.key_identifier.l0,
             blob.key_identifier.l1,
@@ -791,7 +788,7 @@ async def async_ncrypt_unprotect_secret(
         )
 
     if not rk.is_public_key:
-        cache._store_key(blob.security_descriptor, rk)
+        cache._store_key(target_sd, rk)
 
     return _decrypt_blob(blob, rk)
 
@@ -857,11 +854,8 @@ async def async_ncrypt_protect_secret(
     l1 = -1
     l2 = -1
 
-    sd = sd_to_bytes(
-        owner="S-1-5-18",
-        group="S-1-5-18",
-        dacl=[ace_to_bytes(protection_descriptor, 3), ace_to_bytes("S-1-1-0", 2)],
-    )
+    descriptor = ProtectionDescriptor.parse(protection_descriptor)
+    sd = descriptor.get_target_sd()
 
     cache = cache or KeyCache()
     rk = _get_protection_gke_from_cache(root_key_identifier, sd, cache)
@@ -886,4 +880,4 @@ async def async_ncrypt_protect_secret(
     if not rk.is_public_key:
         cache._store_key(sd, rk)
 
-    return _encrypt_blob(data, rk, sd, protection_descriptor)
+    return _encrypt_blob(data, rk, descriptor)

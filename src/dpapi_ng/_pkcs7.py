@@ -6,7 +6,7 @@ from __future__ import annotations
 import dataclasses
 import typing as t
 
-from ._asn1 import ASN1Header, ASN1Reader, ASN1Tag, TagClass, TypeTagNumber
+from ._asn1 import ASN1Header, ASN1Reader, ASN1Tag, ASN1Writer, TagClass, TypeTagNumber
 
 
 @dataclasses.dataclass
@@ -20,6 +20,21 @@ class ContentInfo:
     #     content [0] EXPLICIT ANY DEFINED BY contentType }
 
     #   ContentType ::= OBJECT IDENTIFIER
+
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as ci_sequence:
+            ci_sequence.write_object_identifier(self.content_type)
+            ci_sequence.write_octet_string(
+                self.content,
+                ASN1Tag(
+                    tag_class=TagClass.CONTEXT_SPECIFIC,
+                    tag_number=0,
+                    is_constructed=True,
+                ),
+            )
 
     @classmethod
     def unpack(
@@ -77,6 +92,19 @@ class EnvelopedData:
 
     #   UnprotectedAttributes ::= SET SIZE (1..MAX) OF Attribute
 
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as w:
+            w.write_integer(self.version)
+
+            with w.push_set_of() as recipient_writer:
+                for ri in self.recipient_infos:
+                    ri.pack(recipient_writer)
+
+            self.encrypted_content_info.pack(w)
+
     @classmethod
     def unpack(
         cls,
@@ -115,6 +143,12 @@ class RecipientInfo:
     #     pwri [3] PasswordRecipientinfo,
     #     ori [4] OtherRecipientInfo }
 
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        raise NotImplementedError()  # pragma: nocover
+
     @classmethod
     def unpack(
         cls,
@@ -123,7 +157,7 @@ class RecipientInfo:
         header = reader.peek_header()
         tag = header.tag
 
-        if tag.tag_class == TagClass.CONTEXT_SPECIFIC and tag.tag_number == 2:
+        if tag.tag_class == TagClass.CONTEXT_SPECIFIC and tag.tag_number == KEKRecipientInfo.choice:
             return KEKRecipientInfo.unpack(reader, header=header)
 
         raise NotImplementedError(f"Unimplemented RecipientInfo choice {tag}")
@@ -144,6 +178,22 @@ class KEKRecipientInfo(RecipientInfo):
     #     kekid KEKIdentifier,
     #     keyEncryptionAlgorithm KeyEncryptionAlgorithmIdentifier,
     #     encryptedKey EncryptedKey }
+
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence(
+            tag=ASN1Tag(
+                tag_class=TagClass.CONTEXT_SPECIFIC,
+                tag_number=self.choice,
+                is_constructed=True,
+            )
+        ) as w:
+            w.write_integer(self.version)
+            self.kekid.pack(w)
+            self.key_encryption_algorithm.pack(w)
+            w.write_octet_string(self.encrypted_key)
 
     @classmethod
     def unpack(
@@ -177,6 +227,19 @@ class KEKIdentifier:
     #     keyIdentifier OCTET STRING,
     #     date GeneralizedTime OPTIONAL,
     #     other OtherKeyAttribute OPTIONAL }
+
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as w:
+            w.write_octet_string(self.key_identifier)
+
+            if self.date:
+                w.write_generalized_time(self.date)
+
+            if self.other:
+                self.other.pack(w)
 
     @classmethod
     def unpack(
@@ -214,6 +277,15 @@ class OtherKeyAttribute:
     #     keyAttrId OBJECT IDENTIFIER,
     #     keyAttr ANY DEFINED BY keyAttrId OPTIONAL }
 
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as w:
+            w.write_object_identifier(self.key_attr_id)
+            if self.key_attr:
+                w.write_raw(self.key_attr)
+
     @classmethod
     def unpack(
         cls,
@@ -245,6 +317,24 @@ class EncryptedContentInfo:
     #     encryptedContent [0] IMPLICIT EncryptedContent OPTIONAL }
 
     # ContentEncryptionAlgorithmIdentifier ::= AlgorithmIdentifier
+
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as w:
+            w.write_object_identifier(self.content_type)
+            self.algorithm.pack(w)
+
+            if self.content:
+                w.write_octet_string(
+                    self.content,
+                    ASN1Tag(
+                        tag_class=TagClass.CONTEXT_SPECIFIC,
+                        tag_number=0,
+                        is_constructed=False,
+                    ),
+                )
 
     @classmethod
     def unpack(
@@ -284,6 +374,15 @@ class AlgorithmIdentifier:
     #   parameters      ANY DEFINED BY algorithm OPTIONAL
     # }
 
+    def pack(
+        self,
+        writer: ASN1Writer,
+    ) -> None:
+        with writer.push_sequence() as w:
+            w.write_object_identifier(self.algorithm)
+            if self.parameters:
+                w.write_raw(self.parameters)
+
     @classmethod
     def unpack(
         cls,
@@ -299,29 +398,4 @@ class AlgorithmIdentifier:
         return AlgorithmIdentifier(
             algorithm=algorithm,
             parameters=parameters,
-        )
-
-
-@dataclasses.dataclass
-class NCryptProtectionDescriptor:
-    content_type: str
-    type: str
-    value: str
-
-    @classmethod
-    def unpack(
-        cls,
-        data: t.Union[bytes, bytearray, memoryview],
-    ) -> NCryptProtectionDescriptor:
-        reader = ASN1Reader(data).read_sequence()
-        content_type = reader.read_object_identifier()
-
-        reader = reader.read_sequence().read_sequence().read_sequence()
-        value_type = reader.read_utf8_string()
-        value = reader.read_utf8_string()
-
-        return NCryptProtectionDescriptor(
-            content_type=content_type,
-            type=value_type,
-            value=value,
         )
