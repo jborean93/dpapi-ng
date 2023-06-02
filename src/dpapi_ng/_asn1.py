@@ -538,7 +538,7 @@ class ASN1Writer:
         value: int,
         tag: t.Optional[ASN1Tag] = None,
     ) -> None:
-        """Write an ASN.1 ENUMEATES value.
+        """Write an ASN.1 ENUMERATED value.
 
         Writes a enumerated value to the current writer.
 
@@ -548,6 +548,22 @@ class ASN1Writer:
                 universal tag.
         """
         self._data.extend(_pack_asn1_enumerated(value, tag=tag))
+
+    def write_generalized_time(
+        self,
+        value: str,
+        tag: t.Optional[ASN1Tag] = None,
+    ) -> None:
+        """Write an ASN.1 GENERALIZED_TIME value.
+
+        Writes a generalized time string to the current writer.
+
+        Args:
+            value: The generalized time to write.
+            tag: Optional tag to use with the value, defaults to the
+                GENERALIZED_TIME universal tag.
+        """
+        self._data.extend(_pack_asn1_generalized_time(value, tag=tag))
 
     def write_integer(
         self,
@@ -575,7 +591,7 @@ class ASN1Writer:
         Writes a bytes string value to the current writer.
 
         Args:
-            value: The bool to write.
+            value: The bytes to write.
             tag: Optional tag to use with the value, defaults to the
                 OCTET_STRING universal tag.
         """
@@ -596,6 +612,29 @@ class ASN1Writer:
                 OBJECT_IDENTIFIER universal tag.
         """
         self._data.extend(_pack_asn1_object_identifier(value, tag=tag))
+
+    def write_utf8_string(
+        self,
+        value: str,
+        tag: t.Optional[ASN1Tag] = None,
+    ) -> None:
+        """Write an ASN.1 UTF8_STRING value.
+
+        Writes a UTF-8 string value to the current writer.
+
+        Args:
+            value: The string to write.
+            tag: Optional tag to use with the value, defaults to the
+                UTF8_STRING universal tag.
+        """
+        self._data.extend(_pack_asn1_utf8_string(value, tag=tag))
+
+    def write_raw(
+        self,
+        value: bytes,
+    ) -> None:
+        """Appends raw values onto the ASN1 writer."""
+        self._data.extend(value)
 
     def get_data(self) -> bytearray:
         """Gets the data written to the writer.
@@ -711,6 +750,17 @@ def _pack_asn1_enumerated(
     return _pack_asn1_integer(value, tag=tag or ASN1Tag.universal_tag(TypeTagNumber.ENUMERATED))
 
 
+def _pack_asn1_generalized_time(
+    value: str,
+    tag: t.Optional[ASN1Tag] = None,
+) -> bytes:
+    """Packs an int into an ASN.1 GENERALIZED_TIME byte value with optional universal tagging."""
+    if not tag:
+        tag = ASN1Tag.universal_tag(TypeTagNumber.GENERALIZED_TIME)
+
+    return _pack_asn1(tag.tag_class, tag.is_constructed, tag.tag_number, value.encode("utf-8"))
+
+
 def _pack_asn1_integer(
     value: int,
     tag: t.Optional[ASN1Tag] = None,
@@ -773,11 +823,23 @@ def _pack_asn1_object_identifier(
     tag: t.Optional[ASN1Tag] = None,
 ) -> bytes:
     """Packs an object identifier value represented as string into an
-    ASN.1 OCTET STRING byte value with optional universal tagging."""
+    ASN.1 OBJECT IDENTIFIER value with optional universal tagging."""
     if not tag:
         tag = ASN1Tag.universal_tag(TypeTagNumber.OBJECT_IDENTIFIER)
 
     return _pack_asn1(tag.tag_class, tag.is_constructed, tag.tag_number, _encode_object_identifier(value))
+
+
+def _pack_asn1_utf8_string(
+    value: str,
+    tag: t.Optional[ASN1Tag] = None,
+) -> bytes:
+    """Packs an object identifier value represented as string into an
+    ASN.1 UTF8 STRING byte value with optional universal tagging."""
+    if not tag:
+        tag = ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING)
+
+    return _pack_asn1(tag.tag_class, tag.is_constructed, tag.tag_number, value.encode("utf-8"))
 
 
 def _encode_object_identifier(oid: str) -> bytes:

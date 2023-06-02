@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import dataclasses
+import enum
 import typing as t
 import uuid
 
-from ._asn1 import ASN1Reader, ASN1Tag, ASN1Writer, TagClass, TypeTagNumber
+from ._asn1 import ASN1Reader, ASN1Writer
 from ._pkcs7 import (
+    AlgorithmIdentifier,
     ContentInfo,
+    EncryptedContentInfo,
     EnvelopedData,
+    KEKIdentifier,
     KEKRecipientInfo,
-    NCryptProtectionDescriptor,
+    OtherKeyAttribute,
 )
 from ._security_descriptor import ace_to_bytes, sd_to_bytes
 
@@ -121,10 +125,82 @@ class KeyIdentifier:
         )
 
 
+class ProtectionDescriptorType(enum.Enum):
+    SID = "1.3.6.1.4.1.311.74.1.1"
+    KEY_FILE = "1.3.6.1.4.1.311.74.1.2"  # KeyFile in UF8String type
+    SDDL = "1.3.6.1.4.1.311.74.1.5"
+    LOCAL = "1.3.6.1.4.1.311.74.1.8"
+
+
+@dataclasses.dataclass(frozen=True)
+class ProtectionDescriptor:
+    type: ProtectionDescriptorType
+    value: str
+
+    def get_target_sd(self) -> bytes:
+        raise NotImplementedError()  # pragma: nocover
+
+    def pack(self) -> bytes:
+        writer = ASN1Writer()
+
+        with writer.push_sequence() as w:
+            w.write_object_identifier(self.type.value)
+
+            with w.push_sequence() as w1:
+                with w1.push_sequence() as w2:
+                    with w2.push_sequence() as w3:
+                        w3.write_utf8_string(self.type.name)
+                        w3.write_utf8_string(self.value)
+
+        return writer.get_data()
+
+    @classmethod
+    def parse(
+        cls,
+        value: str,
+    ) -> ProtectionDescriptor:
+        # Currently only the SID type is supported
+        return SIDDescriptor(value)
+
+    @classmethod
+    def unpack(
+        cls,
+        data: t.Union[bytes, bytearray, memoryview],
+    ) -> ProtectionDescriptor:
+        reader = ASN1Reader(data).read_sequence()
+        content_type = reader.read_object_identifier()
+
+        reader = reader.read_sequence().read_sequence().read_sequence()
+        value_type = reader.read_utf8_string()
+        value = reader.read_utf8_string()
+
+        if content_type == ProtectionDescriptorType.SID.value and value_type == "SID":
+            return SIDDescriptor(value)
+
+        else:
+            raise ValueError(f"DPAPI-NG protection descriptor type {content_type} '{value_type}' is unsupported")
+
+
+@dataclasses.dataclass(frozen=True)
+class SIDDescriptor(ProtectionDescriptor):
+    type: ProtectionDescriptorType = dataclasses.field(init=False, default=ProtectionDescriptorType.SID)
+
+    def get_target_sd(self) -> bytes:
+        # Build the target security descriptor from the SID passed in. This SD
+        # contains an ACE per target user with a mask of 0x3 and a final ACE of
+        # the current user with a mask of 0x2. When viewing this over the wire
+        # the current user is set as S-1-1-0 (World) and the owner/group is
+        # S-1-5-18 (SYSTEM).
+        return sd_to_bytes(
+            owner="S-1-5-18",
+            group="S-1-5-18",
+            dacl=[ace_to_bytes(self.value, 3), ace_to_bytes("S-1-1-0", 2)],
+        )
+
+
 @dataclasses.dataclass
 class DPAPINGBlob:
     MICROSOFT_SOFTWARE_OID = "1.3.6.1.4.1.311.74.1"
-    MICROSOFT_SOFTWARE_SYSTEMS_OID = "1.3.6.1.4.1.311.74.1.1"
 
     """DPAPI NG Blob.
 
@@ -135,7 +211,7 @@ class DPAPINGBlob:
 
     Args:
         key_identifier: The key identifier for the KEK.
-        security_descriptor: The Security Descriptor that protects the key.
+        protection_descriptor: The protection descriptor that protects the key.
         enc_cek: The encrypted CEK.
         enc_cek_algorithm: The encrypted CEK algorithm OID.
         enc_cek_parameters: The encrypted CEK algorithm parameters.
@@ -145,7 +221,7 @@ class DPAPINGBlob:
     """
 
     key_identifier: KeyIdentifier
-    security_descriptor: bytes
+    protection_descriptor: ProtectionDescriptor
     enc_cek: bytes
     enc_cek_algorithm: str
     enc_cek_parameters: t.Optional[bytes]
@@ -155,71 +231,65 @@ class DPAPINGBlob:
 
     def pack(
         self,
-        protection_descriptor: str,
         blob_in_envelope: bool = True,
     ) -> bytes:
-        """
+        """Pack the DPAPI-NG Blob
+
+        Packs the DPAPI-NG blob into a byte string.
+
         Args:
-            protection_descriptor: The protection descriptor to embed in the EnvelopedData structure.
-            blob_in_envelope: True to store the encrypted blob in the EnvelopedData structure (NCryptProtectSecret general),
-                False to append the encrypted blob after the EnvelopedData structure (LAPS style).
+            blob_in_envelope: True to store the encrypted blob in the
+                EnvelopedData structure (NCryptProtectSecret general), False to
+                append the encrypted blob after the EnvelopedData structure
+                (LAPS style).
 
         Returns:
             bytes: The DPAPI NG Blob data.
         """
-        # TODO: it's not very nice to pass protection_descriptor as separate parameter here, should be extracted from self.security_descriptor
         writer = ASN1Writer()
-        with writer.push_sequence() as ContentInfo:
-            ContentInfo.write_object_identifier(EnvelopedData.CONTENT_TYPE_ENVELOPED_DATA_OID)
-            with ContentInfo.push_sequence(
-                ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=0, is_constructed=True)
-            ) as Content:
-                with Content.push_sequence() as enveloped_data:
-                    enveloped_data.write_integer(2)  # EnvelopedData CMSVersion
-                    with enveloped_data.push_set() as recipient_infos:
-                        with recipient_infos.push_sequence(
-                            ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=2, is_constructed=True)
-                        ) as recipient_info:
-                            recipient_info.write_integer(4)  # KEKRecipientInfo CMSVersion
-                            with recipient_info.push_sequence() as key_agree_recipient_info:
-                                key_agree_recipient_info.write_octet_string(self.key_identifier.pack())
-                                with key_agree_recipient_info.push_sequence() as originator:
-                                    originator.write_object_identifier(DPAPINGBlob.MICROSOFT_SOFTWARE_OID)
-                                    with originator.push_sequence() as originator_sequence:
-                                        originator_sequence.write_object_identifier(
-                                            DPAPINGBlob.MICROSOFT_SOFTWARE_SYSTEMS_OID
-                                        )
-                                        with originator_sequence.push_sequence() as originator_sequence_2:
-                                            with originator_sequence_2.push_sequence() as originator_sequence_3:
-                                                with originator_sequence_3.push_sequence() as originator_sequence_4:
-                                                    originator_sequence_4.write_octet_string(
-                                                        b"SID", ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING)
-                                                    )
-                                                    originator_sequence_4.write_octet_string(
-                                                        protection_descriptor.encode("utf-8"),
-                                                        ASN1Tag.universal_tag(TypeTagNumber.UTF8_STRING),
-                                                    )
-                            with recipient_info.push_sequence() as kek_recipient_info:
-                                kek_recipient_info.write_object_identifier(self.enc_cek_algorithm)
-                            recipient_info.write_octet_string(self.enc_cek)
-                    with enveloped_data.push_sequence() as encrypted_content_info:
-                        encrypted_content_info.write_object_identifier(EnvelopedData.CONTENT_TYPE_DATA_OID)
-                        with encrypted_content_info.push_sequence() as content_encryption_algorithm_identifier:
-                            content_encryption_algorithm_identifier.write_object_identifier(self.enc_content_algorithm)
-                            if self.enc_content_parameters:
-                                content_encryption_algorithm_identifier._data.extend(self.enc_content_parameters)
-                            else:
-                                content_encryption_algorithm_identifier._data.extend(b"")
-                        if blob_in_envelope:
-                            encrypted_content_info.write_octet_string(
-                                self.enc_content,
-                                tag=ASN1Tag(tag_class=TagClass.CONTEXT_SPECIFIC, tag_number=0, is_constructed=False),
-                            )
+
+        recipient_info = KEKRecipientInfo(
+            version=4,
+            kekid=KEKIdentifier(
+                key_identifier=self.key_identifier.pack(),
+                other=OtherKeyAttribute(
+                    key_attr_id=DPAPINGBlob.MICROSOFT_SOFTWARE_OID,
+                    key_attr=self.protection_descriptor.pack(),
+                ),
+            ),
+            key_encryption_algorithm=AlgorithmIdentifier(
+                self.enc_cek_algorithm,
+                self.enc_cek_parameters,
+            ),
+            encrypted_key=self.enc_cek,
+        )
+
+        enveloped_data = EnvelopedData(
+            version=2,
+            recipient_infos=[recipient_info],
+            encrypted_content_info=EncryptedContentInfo(
+                content_type=EnvelopedData.CONTENT_TYPE_DATA_OID,
+                algorithm=AlgorithmIdentifier(
+                    algorithm=self.enc_content_algorithm,
+                    parameters=self.enc_content_parameters,
+                ),
+                content=self.enc_content if blob_in_envelope else b"",
+            ),
+        )
+        writer = ASN1Writer()
+        enveloped_data.pack(writer)
+
+        content_info = ContentInfo(
+            content_type=EnvelopedData.CONTENT_TYPE_ENVELOPED_DATA_OID,
+            content=writer.get_data(),
+        )
+        writer = ASN1Writer()
+        content_info.pack(writer)
 
         return b"".join(
             [
                 writer.get_data(),
-                self.enc_content if not blob_in_envelope else b"",
+                b"" if blob_in_envelope else self.enc_content,
             ]
         )
 
@@ -251,23 +321,7 @@ class DPAPINGBlob:
         if not kek_info.kekid.other or kek_info.kekid.other.key_attr_id != DPAPINGBlob.MICROSOFT_SOFTWARE_OID:
             raise ValueError("DPAPI-NG KEK Id is not in the expected format")
 
-        protection_descriptor = NCryptProtectionDescriptor.unpack(kek_info.kekid.other.key_attr or b"")
-        if (
-            protection_descriptor.content_type != DPAPINGBlob.MICROSOFT_SOFTWARE_SYSTEMS_OID
-            or protection_descriptor.type != "SID"
-        ):
-            raise ValueError(f"DPAPI-NG protection descriptor type '{protection_descriptor.type}' is unsupported")
-
-        # Build the target security descriptor from the SID passed in. This SD
-        # contains an ACE per target user with a mask of 0x3 and a final ACE of
-        # the current user with a mask of 0x2. When viewing this over the wire
-        # the current user is set as S-1-1-0 (World) and the owner/group is
-        # S-1-5-18 (SYSTEM).
-        target_sd = sd_to_bytes(
-            owner="S-1-5-18",
-            group="S-1-5-18",
-            dacl=[ace_to_bytes(protection_descriptor.value, 3), ace_to_bytes("S-1-1-0", 2)],
-        )
+        protection_descriptor = ProtectionDescriptor.unpack(kek_info.kekid.other.key_attr or b"")
 
         # Some DPAPI blobs don't include the content in the PKCS7 payload but
         # just append after the blob.
@@ -275,7 +329,7 @@ class DPAPINGBlob:
 
         return DPAPINGBlob(
             key_identifier=key_identifier,
-            security_descriptor=target_sd,
+            protection_descriptor=protection_descriptor,
             enc_cek=kek_info.encrypted_key,
             enc_cek_algorithm=kek_info.key_encryption_algorithm.algorithm,
             enc_cek_parameters=kek_info.key_encryption_algorithm.parameters,
