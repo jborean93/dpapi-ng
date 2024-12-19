@@ -6,6 +6,7 @@ from __future__ import annotations
 import typing as t
 
 import dns.asyncresolver
+import dns.rdtypes
 import dns.resolver
 
 
@@ -24,10 +25,10 @@ def _get_highest_answer(
         answers.append(
             SrvRecord(
                 # The trailing . causes errors on Windows and the SPN lookup.
-                target=str(a.target).rstrip("."),
-                port=a.port,
-                weight=a.weight,
-                priority=a.priority,
+                target=str(a.target).rstrip("."),  # type: ignore[attr-defined]
+                port=a.port,  # type: ignore[attr-defined]
+                weight=a.weight,  # type: ignore[attr-defined]
+                priority=a.priority,  # type: ignore[attr-defined]
             )
         )
 

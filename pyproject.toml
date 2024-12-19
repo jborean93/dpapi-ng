@@ -8,7 +8,7 @@ build-backend = "setuptools.build_meta"
 name = "dpapi-ng"
 description = "DPAPI NG decryption for Python"
 readme = "README.md"
-requires-python = ">=3.7"
+requires-python = ">=3.9"
 license = {file = "LICENSE"}
 authors = [
     { name = "Jordan Borean", email = "jborean93@gmail.com" }
@@ -18,15 +18,15 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.7",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11"
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13"
 ]
 dependencies = [
     "dnspython >= 2.0.0",  # Needed for DC lookup support
-    "cryptography",
+    "cryptography >= 3.4.4",  # py.typed added, runtime technically need 3.1 but this makes it simpler for testing
     "pyspnego >= 0.9.0",  # Needed for DCE support
 ]
 dynamic = ["version"]
@@ -90,24 +90,3 @@ asyncio_mode = "auto"
 testpaths = "tests"
 junit_family = "xunit2"
 norecursedirs = "tests/integration"
-
-[tool.tox]
-legacy_tox_ini = """
-[tox]
-envlist = sanity,py37,py38,py39,py310,py311
-skip_missing_interpreters = true
-isolated_build = True
-
-[testenv]
-deps =
-    -r{toxinidir}/requirements-test.txt
-
-commands =
-    python -m pytest -v --cov dpapi_ng --cov-report term-missing
-
-[testenv:sanity]
-commands =
-    python -m black . --check
-    python -m isort . --check-only
-    python -m mypy .
-"""
