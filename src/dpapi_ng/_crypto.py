@@ -8,7 +8,6 @@ import os
 import typing as t
 
 from cryptography.hazmat.primitives import hashes, keywrap
-from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.concatkdf import ConcatKDFHash
 from cryptography.hazmat.primitives.kdf.kbkdf import KBKDFHMAC, CounterLocation, Mode
@@ -53,7 +52,7 @@ def cek_generate(
     algorithm: str,
 ) -> t.Tuple[bytes, bytes]:
     if algorithm == AlgorithmOID.AES256_WRAP:
-        cek = AESGCM.generate_key(bit_length=256)
+        cek = AESGCM.generate_key(256)
         cek_iv = os.urandom(12)
         return cek, cek_iv
 

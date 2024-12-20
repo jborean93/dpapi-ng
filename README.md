@@ -20,8 +20,8 @@ This implements the [MS-GKDI Group Key Distribution Protocol](https://learn.micr
 
 ## Requirements
 
-* CPython 3.7+
-* [cryptography](https://pypi.org/project/cryptography/)
+* CPython 3.9+
+* [cryptography >= 3.1](https://pypi.org/project/cryptography/)
 * [dnspython >= 2.0.0](https://pypi.org/project/dnspython/)
 * [pyspnego >= 0.9.0](https://pypi.org/project/pyspnego/)
 

@@ -131,7 +131,8 @@
 #           @{ N = 'Name'; E = { $_.DisplayName } },
 #           @{ N = 'AppId'; E = { $_.PSChildName } }
 #       )
-#   } | Where-Object { $_.Name -like 'Python * Standard Library *' }
+#   } | Where-Object { $_.Name -like 'Python * Standard Library *' } |
+#     Sort-Object { [Version]$_.Name.Split(' ')[1] }, Name
 
   - name: install Python interpreters
     ansible.windows.win_package:
@@ -140,35 +141,35 @@
       product_id: '{{ item.product_id }}'
       state: present
     with_items:
-    - url: https://www.python.org/ftp/python/3.7.9/python-3.7.9.exe
-      product_id: '{65048DA1-5996-4FF9-B20A-66EB2E68D0A4}'
-      arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.7.9/python-3.7.9-amd64.exe
-      product_id: '{FF740026-2FC0-4F8A-A046-8B316AF4ECA6}'
-      arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.8.10/python-3.8.10.exe
-      product_id: '{4196628C-AE5C-4304-B166-B7C1E93CDC25}'
-      arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.8.10/python-3.8.10-amd64.exe
-      product_id: '{080E0048-853C-49FB-96ED-30DEF7AB6E34}'
-      arguments: /quiet InstallAllUsers=1 Shortcuts=0
     - url: https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe
       product_id: '{E23C472D-F346-4D47-A909-9D48E5D7252F}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
     - url: https://www.python.org/ftp/python/3.9.13/python-3.9.13-amd64.exe
       product_id: '{90A30DAB-6FD8-4CF8-BB8B-C0DB21C69F20}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.10.10/python-3.10.10.exe
-      product_id: '{0438638B-4373-489E-BCE6-9C2D18119112}'
+    - url: https://www.python.org/ftp/python/3.10.11/python-3.10.11.exe
+      product_id: '{2627E7A3-6630-4858-8151-D91D1AF62F8E}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.10.10/python-3.10.10-amd64.exe
-      product_id: '{DCFC24EF-C987-4F08-A807-C562D5546446}'
+    - url: https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe
+      product_id: '{6532871D-1F76-408C-ABD0-63C732137351}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.11.2/python-3.11.2.exe
-      product_id: '{BF492FDC-5681-4EE9-A631-1F11748D4E05}'
+    - url: https://www.python.org/ftp/python/3.11.9/python-3.11.9.exe
+      product_id: '{89D284CB-6250-4C7A-88DD-56A7CE162ACD}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
-    - url: https://www.python.org/ftp/python/3.11.2/python-3.11.2-amd64.exe
-      product_id: '{6C19B2EE-FA34-4270-A87F-1FF008C1AC6E}'
+    - url: https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+      product_id: '{9AFDC691-40E5-4B15-835F-9A524AC4672C}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.12.8/python-3.12.8.exe
+      product_id: '{7F7E778C-EE41-4573-A6A0-CD38F116A464}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.12.8/python-3.12.8-amd64.exe
+      product_id: '{DF8A5B68-D4BE-4580-9777-DA1A5EBA9843}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.13.1/python-3.13.1.exe
+      product_id: '{CF9B1D77-9343-43AC-AB82-C8E7F1973411}'
+      arguments: /quiet InstallAllUsers=1 Shortcuts=0
+    - url: https://www.python.org/ftp/python/3.13.1/python-3.13.1-amd64.exe
+      product_id: '{29A3DBE6-A3D3-42C9-9338-A321F61C897A}'
       arguments: /quiet InstallAllUsers=1 Shortcuts=0
 
   - name: ensure virtualenv package is installed for each Python install
@@ -212,7 +213,7 @@
   - name: get dpapi_ng artifact sdist filename
     ansible.windows.win_find:
       paths: C:\temp\wheels
-      patterns: 'dpapi-ng-*.tar.gz'
+      patterns: 'dpapi_ng-*.tar.gz'
       use_regex: false
     register: dpapi_ng_sdist_file
 
@@ -224,7 +225,7 @@
   - name: get dpapi-ng artifact version
     set_fact:
       dpapi_ng_version: >-
-        {{ dpapi_ng_sdist_file.files[0].filename | regex_replace('dpapi-ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+        {{ dpapi_ng_sdist_file.files[0].filename | regex_replace('dpapi_ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
 
   - name: install dpapi-ng into virtualenv
     ansible.windows.win_command:
@@ -356,7 +357,7 @@
   - name: get dpapi-ng artifact sdist filename
     ansible.builtin.find:
       paths: ~/wheels
-      patterns: 'dpapi-ng-*.tar.gz'
+      patterns: 'dpapi_ng-*.tar.gz'
       recurse: false
       file_type: file
     become: false
@@ -370,7 +371,7 @@
   - name: get dpapi-ng artifact version
     set_fact:
       dpapi_ng_version: >-
-        {{ dpapi_ng_sdist_file.files[0].path | basename | regex_replace('dpapi-ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
+        {{ dpapi_ng_sdist_file.files[0].path | basename | regex_replace('dpapi_ng-(?P<version>.*)\.tar\.gz', '\g<version>') }}
 
   - name: create a virtualenv for each Python interpreter
     ansible.builtin.pip:
